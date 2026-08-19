@@ -12,7 +12,23 @@ import type { CommentRow } from "@/lib/posterpal/types";
 import { useShellStore } from "@/lib/store";
 import { relativeTime } from "@/lib/utils";
 
-export const Route = createFileRoute("/inbox")({ component: () => <Guard><Inbox /></Guard> });
+export const Route = createFileRoute("/inbox")({
+  component: () => (
+    <Guard>
+      <Inbox />
+    </Guard>
+  ),
+});
+
+function draftsOf(json: string | null | undefined): string[] {
+  if (!json) return [];
+  try {
+    const parsed = JSON.parse(json) as unknown;
+    return Array.isArray(parsed) ? parsed.filter((x): x is string => typeof x === "string") : [];
+  } catch {
+    return [];
+  }
+}
 
 function Inbox() {
   const pageId = useShellStore((s) => s.selectedPageId) ?? undefined;
@@ -23,10 +39,12 @@ function Inbox() {
   const [syncing, setSyncing] = useState(false);
 
   const load = () => {
-    void commentsFn({ data: { filter, pageId } }).then((list) => {
-      setRows(list);
-      setActive((cur) => list.find((c) => c.id === cur?.id) ?? list[0] ?? null);
-    });
+    void commentsFn({ data: { filter, pageId } })
+      .then((list) => {
+        setRows(list);
+        setActive((cur) => list.find((c) => c.id === cur?.id) ?? list[0] ?? null);
+      })
+      .catch((e: unknown) => toast.error(e instanceof Error ? e.message : "Could not load inbox"));
   };
   useEffect(load, [filter, pageId]);
 
@@ -35,8 +53,7 @@ function Inbox() {
       setDraft("");
       return;
     }
-    const parsed = active.reply_drafts_json ? (JSON.parse(active.reply_drafts_json) as string[]) : [];
-    setDraft(parsed[0] ?? "");
+    setDraft(draftsOf(active.reply_drafts_json)[0] ?? "");
   }, [active?.id]);
 
   return (
@@ -45,7 +62,8 @@ function Inbox() {
         <div className="flex flex-wrap items-start justify-between gap-2">
           <PageHeader
             title="Inbox"
-            hint="AI may draft replies. A human must click Send. PosterPal never auto-likes, auto-follows, or auto-posts comments. Pull from Facebook imports live comments on posts this desk knows about."
+            line="AI may draft. You click Send — nothing auto-comments."
+            hint="PosterPal never auto-likes, auto-follows, or auto-posts comments. Pull from Facebook imports live comments on posts this desk knows about."
           />
           <Button
             size="sm"
@@ -68,9 +86,15 @@ function Inbox() {
         </div>
         <Tabs value={filter} onValueChange={(v) => setFilter(v as typeof filter)}>
           <TabsList>
-            <TabsTrigger value="needs" title="Comments that still need a human reply">Needs reply</TabsTrigger>
-            <TabsTrigger value="hidden" title="Comments you hid on Graph (is_hidden=true)">Hidden</TabsTrigger>
-            <TabsTrigger value="all" title="Every imported comment for the selected Page">All</TabsTrigger>
+            <TabsTrigger value="needs" title="Comments that still need a human reply">
+              Needs reply
+            </TabsTrigger>
+            <TabsTrigger value="hidden" title="Comments you hid on Graph (is_hidden=true)">
+              Hidden
+            </TabsTrigger>
+            <TabsTrigger value="all" title="Every imported comment for the selected Page">
+              All
+            </TabsTrigger>
           </TabsList>
         </Tabs>
         <ul className="mt-3 space-y-1">
@@ -82,7 +106,7 @@ function Inbox() {
                 <button
                   type="button"
                   onClick={() => setActive(c)}
-                  className={`w-full rounded-lg px-3 py-2 text-left ${active?.id === c.id ? "bg-accent" : "bg-card hover:bg-muted"}`}
+                  className={`w-full rounded-lg px-3 py-2 text-left transition-colors duration-150 ${active?.id === c.id ? "bg-accent" : "bg-card hover:bg-muted"}`}
                 >
                   <div className="flex items-center justify-between gap-2">
                     <span className="text-[13px] font-semibold">{c.author_name ?? "Visitor"}</span>
@@ -109,11 +133,11 @@ function Inbox() {
           <p className="mt-2 text-[15px]">{active.message}</p>
           <div className="mt-4 space-y-2">
             <div className="flex flex-wrap gap-2">
-              {(active.reply_drafts_json ? (JSON.parse(active.reply_drafts_json) as string[]) : []).map((d, i) => (
+              {draftsOf(active.reply_drafts_json).map((d, i) => (
                 <button
                   key={i}
                   type="button"
-                  className="max-w-full rounded-lg border border-border px-3 py-2 text-left text-[13px] hover:bg-muted"
+                  className="max-w-full rounded-lg border border-border px-3 py-2 text-left text-[13px] transition-colors duration-150 hover:bg-muted"
                   onClick={() => setDraft(d)}
                 >
                   {d}
@@ -151,7 +175,9 @@ function Inbox() {
               <Button
                 variant="outline"
                 onClick={() => {
-                  void hideCommentFn({ data: { commentId: active.id, hidden: !active.is_hidden } }).then(load);
+                  void hideCommentFn({ data: { commentId: active.id, hidden: !active.is_hidden } })
+                    .then(load)
+                    .catch((e: unknown) => toast.error(e instanceof Error ? e.message : "Hide failed"));
                 }}
               >
                 {active.is_hidden ? "Unhide" : "Hide"}
