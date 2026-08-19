@@ -1,0 +1,1 @@
+import{g as e}from"./preload-helper-By2AQIzx.js";import{a as t,et as n,t as r,tt as i}from"./app-shell-C6l506wE.js";var a=e();function o({children:e,right:o}){let{user:s,isPending:c}=i();return c?(0,a.jsx)(`div`,{className:`flex min-h-screen bg-background p-6`,children:(0,a.jsx)(t,{className:`h-10 w-48`})}):s?(0,a.jsx)(r,{right:o,children:e}):(0,a.jsx)(n,{})}export{o as t};

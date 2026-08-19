@@ -1,0 +1,124 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme {
+  --font-sans: "Segoe UI", "Segoe UI Variable", system-ui, -apple-system, "Helvetica Neue", sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+
+  --color-background: #f0f2f5;
+  --color-foreground: #050505;
+  --color-card: #ffffff;
+  --color-card-foreground: #050505;
+  --color-popover: #ffffff;
+  --color-popover-foreground: #050505;
+  --color-primary: #1877f2;
+  --color-primary-foreground: #ffffff;
+  --color-secondary: #e4e6eb;
+  --color-secondary-foreground: #050505;
+  --color-muted: #e4e6eb;
+  --color-muted-foreground: #65676b;
+  --color-accent: #e7f3ff;
+  --color-accent-foreground: #1877f2;
+  --color-destructive: #e41e3f;
+  --color-destructive-foreground: #ffffff;
+  --color-border: #dadde1;
+  --color-input: #ccd0d5;
+  --color-ring: #1877f2;
+  --color-success: #31a24c;
+  --color-success-foreground: #ffffff;
+  --color-warning: #f7b928;
+  --color-warning-foreground: #050505;
+  --color-fb-hover: #166fe5;
+  --color-fb-press: #1b74e4;
+  --color-rail: #ffffff;
+  --color-chip: #f0f2f5;
+
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --radius: 8px;
+
+  --shadow-card: 0 1px 2px rgb(0 0 0 / 0.06), 0 0 0 1px rgb(0 0 0 / 0.03);
+  --shadow-lift: 0 8px 24px rgb(0 0 0 / 0.08);
+}
+
+.dark {
+  --color-background: #18191a;
+  --color-foreground: #e4e6eb;
+  --color-card: #242526;
+  --color-card-foreground: #e4e6eb;
+  --color-popover: #242526;
+  --color-popover-foreground: #e4e6eb;
+  --color-primary: #1877f2;
+  --color-primary-foreground: #ffffff;
+  --color-secondary: #3a3b3c;
+  --color-secondary-foreground: #e4e6eb;
+  --color-muted: #3a3b3c;
+  --color-muted-foreground: #b0b3b8;
+  --color-accent: #263951;
+  --color-accent-foreground: #4599ff;
+  --color-destructive: #e41e3f;
+  --color-destructive-foreground: #ffffff;
+  --color-border: #3e4042;
+  --color-input: #3e4042;
+  --color-ring: #4599ff;
+  --color-success: #31a24c;
+  --color-success-foreground: #ffffff;
+  --color-warning: #f7b928;
+  --color-warning-foreground: #050505;
+  --color-fb-hover: #166fe5;
+  --color-fb-press: #1b74e4;
+  --color-rail: #242526;
+  --color-chip: #3a3b3c;
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans;
+    font-size: 15px;
+    line-height: 1.5;
+  }
+
+  h1,
+  h2,
+  h3 {
+    text-wrap: balance;
+  }
+
+  p {
+    text-wrap: pretty;
+  }
+
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-ring);
+    outline-offset: 2px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
