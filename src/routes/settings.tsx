@@ -21,6 +21,7 @@ import type { PageRow, SettingsBag } from "@/lib/posterpal/types";
 import { FacebookNameHelp } from "@/components/facebook-name-help";
 import { PageHeader } from "@/components/page-header";
 import { useShellStore } from "@/lib/store";
+import { copyText } from "@/lib/utils";
 
 export const Route = createFileRoute("/settings")({ component: () => <Guard><Settings /></Guard> });
 
@@ -91,7 +92,18 @@ function Settings() {
             <Input type="password" value={appSecret} onChange={(e) => setAppSecret(e.target.value)} placeholder="Leave blank to keep existing" />
           </div>
           <p className="text-[12px] text-muted-foreground">
-            Valid OAuth Redirect URI: <code className="rounded bg-muted px-1">{redirect}</code>
+            Valid OAuth Redirect URI: <code className="rounded bg-muted px-1">{redirect}</code>{" "}
+            <button
+              type="button"
+              className="underline"
+              onClick={() => {
+                void copyText(redirect).then((ok) =>
+                  toast[ok ? "success" : "error"](ok ? "Redirect URI copied." : "Could not copy."),
+                );
+              }}
+            >
+              Copy
+            </button>
             <br />
             Desktop loopback: <code className="rounded bg-muted px-1">http://127.0.0.1:55443/callback/</code>
             <br />

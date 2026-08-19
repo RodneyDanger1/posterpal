@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Guard } from "@/components/guard";
@@ -15,6 +15,7 @@ export const Route = createFileRoute("/media")({ component: () => <Guard><Media 
 function Media() {
   const pageId = useShellStore((s) => s.selectedPageId) ?? undefined;
   const setPrefill = useShellStore((s) => s.setComposerPrefill);
+  const navigate = useNavigate();
   const [rows, setRows] = useState<MediaLibraryItem[]>([]);
   const [prompt, setPrompt] = useState("");
   const [busy, setBusy] = useState(false);
@@ -22,6 +23,29 @@ function Media() {
   useEffect(() => {
     void mediaLibraryFn({ data: { pageId } }).then(setRows);
   }, [pageId]);
+
+  const reuse = (r: MediaLibraryItem) => {
+    const dataUrl = typeof r.data_url === "string" ? r.data_url : "";
+    if (!dataUrl) {
+      toast.error("This file has no local copy to reuse.");
+      return;
+    }
+    setPrefill({
+      message: "",
+      pageId,
+      mediaType: "Photo",
+      media: [
+        {
+          fileName: String(r.file_name),
+          mimeType: String(r.mime_type ?? "image/jpeg"),
+          dataUrl,
+          altText: String(r.alt_text ?? ""),
+          createdWithAi: false,
+        },
+      ],
+    });
+    void navigate({ to: "/composer" });
+  };
 
   return (
     <div className="space-y-4">
@@ -54,8 +78,22 @@ function Media() {
                     toast.error(r.error);
                     return;
                   }
-                  setPrefill({ message: prompt, pageId, mediaType: "Photo" });
-                  toast.success("Image ready — Composer will open with the prompt as a caption. Re-attach from the generate step in Composer.");
+                  setPrefill({
+                    message: prompt,
+                    pageId,
+                    mediaType: "Photo",
+                    media: [
+                      {
+                        fileName: r.fileName,
+                        mimeType: "image/png",
+                        dataUrl: r.dataUrl,
+                        altText: prompt.slice(0, 200),
+                        createdWithAi: true,
+                      },
+                    ],
+                  });
+                  toast.success("Image ready in Composer.");
+                  void navigate({ to: "/composer" });
                 })
                 .catch((e: unknown) => toast.error(e instanceof Error ? e.message : "Imagine failed"))
                 .finally(() => setBusy(false));
@@ -80,6 +118,9 @@ function Media() {
                 <div className="truncate font-medium">{String(r.file_name)}</div>
                 <div className="truncate text-muted-foreground">{String(r.page_name)}</div>
                 {r.alt_text ? <div className="mt-1 line-clamp-2 text-muted-foreground">{String(r.alt_text)}</div> : <div className="mt-1 text-warning">Missing alt text</div>}
+                <Button size="sm" variant="outline" className="mt-2 w-full" onClick={() => reuse(r)}>
+                  Reuse in Composer
+                </Button>
               </figcaption>
             </figure>
           ))}
