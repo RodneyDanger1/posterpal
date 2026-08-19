@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { bootstrapApp, startPractice, syncNowFn } from "@/lib/posterpal/fns";
-import { inGoldenHour } from "@/lib/posterpal/desk";
+import { inGoldenHour, isOverdue } from "@/lib/posterpal/desk";
 import type { HomeSnapshot } from "@/lib/posterpal/types";
 import { useShellStore } from "@/lib/store";
 import { formatFanCount, relativeTime } from "@/lib/utils";
@@ -101,6 +101,8 @@ function PagesHome() {
     );
   }
 
+  const overdue = data.dueSoon.filter((p) => isOverdue(p.scheduled_publish_time));
+
   return (
     <div className="space-y-4">
       <PageHeader
@@ -128,6 +130,24 @@ function PagesHome() {
             <Link to="/composer">New post</Link>
           </Button>
       </PageHeader>
+
+      {overdue.length > 0 ? (
+        <div className="rounded-lg bg-warning/20 px-3 py-2 text-sm">
+          {overdue.length} scheduled post{overdue.length === 1 ? "" : "s"} missed the slot. Local scheduler only fires while this desk is open.{" "}
+          <Link to="/drafts" className="underline">
+            Open the queue
+          </Link>
+        </div>
+      ) : null}
+
+      {data.inboxCount > 0 ? (
+        <div className="rounded-lg bg-card px-3 py-2 text-sm shadow-card">
+          {data.inboxCount} comment{data.inboxCount === 1 ? "" : "s"} still need a human reply.{" "}
+          <Link to="/inbox" className="underline">
+            Open inbox
+          </Link>
+        </div>
+      ) : null}
 
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
         {data.pages.map((p) => (
@@ -200,7 +220,10 @@ function PagesHome() {
                   <div className="min-w-0">
                     <div className="text-[12px] text-muted-foreground">{p.page_name}</div>
                     <p className="line-clamp-2 text-sm">{p.message}</p>
-                    <div className="text-[12px] text-muted-foreground">{relativeTime(p.scheduled_publish_time)}</div>
+                    <div className="text-[12px] text-muted-foreground">
+                      {relativeTime(p.scheduled_publish_time)}
+                      {isOverdue(p.scheduled_publish_time) ? " · overdue" : ""}
+                    </div>
                   </div>
                   <StatusBadge status={p.status} />
                 </div>
