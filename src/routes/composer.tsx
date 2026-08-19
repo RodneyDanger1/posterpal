@@ -16,15 +16,26 @@ import {
   hashtagsFn,
   bootstrapApp,
   merchFn,
+  mediaLibraryFn,
   policyFn,
   saveIdeaFn,
   saveSnippetFn,
   snippetsFn,
   imaginePhotoFn,
 } from "@/lib/posterpal/fns";
-import type { CadenceResult, MerchRow, PageRow, PolicyResult, SnippetRow } from "@/lib/posterpal/types";
+import {
+  captionHint,
+  captionStats,
+  countHashtags,
+  hasCallToAction,
+  isQuietHour,
+  nextGoodSlot,
+  trimHashtags,
+} from "@/lib/posterpal/desk";
+import type { CadenceResult, MediaLibraryItem, MerchRow, PageRow, PolicyResult, SnippetRow } from "@/lib/posterpal/types";
 import { adoptLivePageId, useShellStore } from "@/lib/store";
 import { validateReel } from "@/lib/posterpal/policy";
+import { copyText } from "@/lib/utils";
 
 export const Route = createFileRoute("/composer")({ component: ComposerPage });
 
@@ -65,6 +76,7 @@ function useComposerState() {
   const [media, setMedia] = useState<MediaFile[]>([]);
   const [merch, setMerch] = useState<MerchRow[]>([]);
   const [snippets, setSnippets] = useState<SnippetRow[]>([]);
+  const [library, setLibrary] = useState<MediaLibraryItem[]>([]);
   const [policy, setPolicy] = useState<PolicyResult | null>(null);
   const [cadence, setCadence] = useState<CadenceResult | null>(null);
   const [busy, setBusy] = useState(false);
@@ -108,6 +120,10 @@ function useComposerState() {
         })),
       );
     }
+    if (prefill.when) {
+      setWhen(prefill.when);
+      setMode("schedule");
+    }
     setPrefill(null);
   }, [prefill, setPrefill, setSelectedPageId]);
 
@@ -124,6 +140,9 @@ function useComposerState() {
     void snippetsFn({ data: { pageId: selected.id } })
       .then(setSnippets)
       .catch(() => setSnippets([]));
+    void mediaLibraryFn({ data: { pageId: selected.id } })
+      .then(setLibrary)
+      .catch(() => setLibrary([]));
   }, [selected?.id]);
 
   useEffect(() => {
@@ -167,6 +186,7 @@ function useComposerState() {
     merch,
     snippets,
     setSnippets,
+    library,
     policy,
     cadence,
     busy,
@@ -185,8 +205,16 @@ function sendLabel(mode: Mode) {
   return "Save local draft";
 }
 
+function pickMode(s: ReturnType<typeof useComposerState>, mode: Mode) {
+  s.setMode(mode);
+  if (mode === "schedule" && !s.when) s.setWhen(nextGoodSlot());
+}
+
 function Composer() {
   const s = useComposerState();
+  const stats = captionStats(s.message);
+  const tags = countHashtags(s.message);
+  const reuse = s.library.filter((r) => typeof r.data_url === "string" && r.data_url).slice(0, 6);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -285,6 +313,16 @@ function Composer() {
               placeholder="Write the caption…"
               className="min-h-40 text-[15px]"
             />
+            <div className="flex flex-wrap items-center justify-between gap-2 text-[12px] text-muted-foreground">
+              <span className="tabular-nums">
+                {stats.chars} chars · {stats.words} words · {tags} #
+              </span>
+              <span>{captionHint(stats.level)}</span>
+            </div>
+            {s.message.trim() && !hasCallToAction(s.message) ? (
+              <p className="text-[12px] text-muted-foreground">No question or CTA in the first pass. Optional.</p>
+            ) : null}
+
             <div className="grid gap-3 sm:grid-cols-2">
               <div className="space-y-1.5">
                 <Label>Link</Label>
@@ -326,6 +364,38 @@ function Composer() {
               </div>
             ) : null}
 
+            {s.mediaType !== "Text" && reuse.length > 0 ? (
+              <div className="flex flex-wrap gap-2">
+                {reuse.map((r) => (
+                  <button
+                    key={String(r.id)}
+                    type="button"
+                    className="overflow-hidden rounded-md border border-border"
+                    title={`Reuse ${String(r.file_name)}`}
+                    onClick={() => {
+                      s.setMedia([
+                        ...s.media,
+                        {
+                          fileName: String(r.file_name),
+                          mimeType: String(r.mime_type ?? "image/jpeg"),
+                          dataUrl: String(r.data_url),
+                          altText: String(r.alt_text ?? ""),
+                          createdWithAi: false,
+                        },
+                      ]);
+                      toast.message("Attached from the library. Review alt text.");
+                    }}
+                  >
+                    {String(r.data_url).startsWith("data:image") || String(r.data_url).startsWith("http") ? (
+                      <img src={String(r.data_url)} alt="" className="size-12 object-cover" />
+                    ) : (
+                      <span className="grid size-12 place-items-center text-[10px]">file</span>
+                    )}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+
             {s.mediaType !== "Text" ? (
               <MediaDrop
                 media={s.media}
@@ -349,17 +419,27 @@ function Composer() {
                 ] as const
               ).map(([m, label, hint]) => (
                 <Hint key={m} label={hint}>
-                  <Button size="sm" variant={s.mode === m ? "default" : "secondary"} onClick={() => s.setMode(m)}>
+                  <Button size="sm" variant={s.mode === m ? "default" : "secondary"} onClick={() => pickMode(s, m)}>
                     {label}
                   </Button>
                 </Hint>
               ))}
               {s.mode === "schedule" ? (
-                <Hint label="Must be 10 minutes to 30 days from now for Facebook. Sooner or later stays on the local scheduler.">
-                  <Input type="datetime-local" className="w-auto" value={s.when} onChange={(e) => s.setWhen(e.target.value)} />
-                </Hint>
+                <>
+                  <Hint label="Must be 10 minutes to 30 days from now for Facebook. Sooner or later stays on the local scheduler.">
+                    <Input type="datetime-local" className="w-auto" value={s.when} onChange={(e) => s.setWhen(e.target.value)} />
+                  </Hint>
+                  <Hint label="Next Tuesday or Wednesday at 1pm local.">
+                    <Button size="sm" variant="outline" onClick={() => s.setWhen(nextGoodSlot())}>
+                      Next good slot
+                    </Button>
+                  </Hint>
+                </>
               ) : null}
             </div>
+            {s.mode === "schedule" && s.when && isQuietHour(s.when) ? (
+              <p className="text-[12px] text-warning">Quiet hours (11pm–6am). Reach is usually thinner then.</p>
+            ) : null}
 
             <div className="flex flex-wrap gap-2">
               <Hint label="Runs the selected mode: publish, schedule, local draft, or Facebook draft.">
@@ -400,6 +480,19 @@ function Composer() {
                   Remember caption
                 </Button>
               </Hint>
+              <Hint label="Copy the caption without posting.">
+                <Button
+                  variant="outline"
+                  disabled={!s.message.trim()}
+                  onClick={() => {
+                    void copyText(s.message).then((ok) =>
+                      toast[ok ? "success" : "error"](ok ? "Caption copied." : "Could not copy."),
+                    );
+                  }}
+                >
+                  Copy
+                </Button>
+              </Hint>
               <Hint label="Grok writes three variants (story, CTA, question). You pick one. Nothing is posted.">
                 <Button
                   variant="outline"
@@ -435,6 +528,13 @@ function Composer() {
                   Hashtags
                 </Button>
               </Hint>
+              {tags > 3 ? (
+                <Hint label="Keeps the first 3 hashtags. Policy default.">
+                  <Button variant="outline" onClick={() => s.setMessage(trimHashtags(s.message, 3))}>
+                    Trim extra #
+                  </Button>
+                </Hint>
+              ) : null}
             </div>
 
             {s.variants ? (
