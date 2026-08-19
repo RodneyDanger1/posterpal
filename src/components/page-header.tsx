@@ -4,10 +4,13 @@ import { Hint } from "./ui/tooltip";
 export function PageHeader({
   title,
   hint,
+  line,
   children,
 }: {
   title: string;
   hint: string;
+  /** Short visible subtitle. Long help stays on the info icon. */
+  line?: string;
   children?: React.ReactNode;
 }) {
   return (
@@ -18,14 +21,14 @@ export function PageHeader({
           <Hint label={hint} side="right">
             <button
               type="button"
-              className="rounded-full p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+              className="rounded-full p-1 text-muted-foreground transition-colors duration-150 hover:bg-muted hover:text-foreground"
               aria-label={`About ${title}`}
             >
               <Info className="size-4" />
             </button>
           </Hint>
         </div>
-        <p className="mt-1 text-[13px] text-muted-foreground">{hint}</p>
+        {line ? <p className="mt-1 text-[13px] text-muted-foreground">{line}</p> : null}
       </div>
       {children ? <div className="flex flex-wrap items-center gap-2">{children}</div> : null}
     </div>
