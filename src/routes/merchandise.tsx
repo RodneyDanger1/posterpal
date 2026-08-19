@@ -9,6 +9,7 @@ import { Label } from "@/components/ui/label";
 import { deleteMerchFn, listPagesFn, merchFn, saveMerchFn } from "@/lib/posterpal/fns";
 import type { MerchRow, PageRow } from "@/lib/posterpal/types";
 import { useShellStore } from "@/lib/store";
+import { copyText } from "@/lib/utils";
 
 export const Route = createFileRoute("/merchandise")({ component: () => <Guard><Merch /></Guard> });
 
@@ -44,9 +45,20 @@ function Merch() {
                 <div className="text-[13px] text-muted-foreground">{r.platform} · {r.url}</div>
                 {r.cta_override ? <div className="mt-1 text-sm">{r.cta_override}</div> : null}
               </div>
-              <Button size="sm" variant="outline" onClick={() => void deleteMerchFn({ data: { id: r.id } }).then(load)}>
-                Remove
-              </Button>
+              <div className="flex shrink-0 flex-col gap-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    void copyText(r.url).then((ok) => toast[ok ? "success" : "error"](ok ? "URL copied." : "Could not copy."));
+                  }}
+                >
+                  Copy URL
+                </Button>
+                <Button size="sm" variant="outline" onClick={() => void deleteMerchFn({ data: { id: r.id } }).then(load)}>
+                  Remove
+                </Button>
+              </div>
             </li>
           ))}
         </ul>

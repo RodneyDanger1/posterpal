@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Guard } from "@/components/guard";
@@ -6,15 +6,18 @@ import { PageHeader } from "@/components/page-header";
 import { StatusBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { cancelPostFn, listPostsFn, publishNowFn } from "@/lib/posterpal/fns";
+import { cancelPostFn, getPostBundle, listPostsFn, publishNowFn } from "@/lib/posterpal/fns";
 import type { PostRow } from "@/lib/posterpal/types";
-import { relativeTime } from "@/lib/utils";
+import { copyText, relativeTime } from "@/lib/utils";
 import { useShellStore } from "@/lib/store";
 
 export const Route = createFileRoute("/drafts")({ component: () => <Guard><Drafts /></Guard> });
 
 function Drafts() {
   const pageId = useShellStore((s) => s.selectedPageId) ?? undefined;
+  const setPrefill = useShellStore((s) => s.setComposerPrefill);
+  const setPage = useShellStore((s) => s.setSelectedPageId);
+  const navigate = useNavigate();
   const [posts, setPosts] = useState<PostRow[]>([]);
   const load = () => {
     void listPostsFn({ data: { pageId, limit: 100 } }).then(setPosts);
@@ -25,6 +28,29 @@ function Drafts() {
     drafts: posts.filter((p) => p.status === "LocalDraft" || p.status === "FacebookDraft"),
     queued: posts.filter((p) => p.status === "LocalScheduled" || p.status === "FacebookScheduled" || p.status === "Publishing"),
     failed: posts.filter((p) => p.status === "Failed"),
+  };
+
+  const openInComposer = (p: PostRow) => {
+    void getPostBundle({ data: { postId: p.id } })
+      .then((bundle) => {
+        setPage(p.page_id);
+        setPrefill({
+          message: p.message ?? "",
+          pageId: p.page_id,
+          mediaType: p.media_type,
+          media: (bundle?.media ?? [])
+            .filter((m) => typeof m.data_url === "string" && m.data_url)
+            .map((m) => ({
+              fileName: m.file_name,
+              mimeType: m.mime_type ?? "application/octet-stream",
+              dataUrl: m.data_url as string,
+              altText: m.alt_text ?? "",
+              createdWithAi: Boolean(m.created_with_ai),
+            })),
+        });
+        void navigate({ to: "/composer" });
+      })
+      .catch((e: unknown) => toast.error(e instanceof Error ? e.message : "Could not open"));
   };
 
   return (
@@ -72,6 +98,20 @@ function Drafts() {
                         Publish now
                       </Button>
                     ) : null}
+                    <Button size="sm" variant="outline" onClick={() => openInComposer(p)}>
+                      Duplicate
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => {
+                        void copyText(p.message ?? "").then((ok) =>
+                          toast[ok ? "success" : "error"](ok ? "Caption copied." : "Nothing to copy."),
+                        );
+                      }}
+                    >
+                      Copy
+                    </Button>
                     <Button
                       size="sm"
                       variant="outline"
