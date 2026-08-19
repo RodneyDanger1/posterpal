@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { bootstrapApp, startPractice, syncNowFn } from "@/lib/posterpal/fns";
+import { inGoldenHour } from "@/lib/posterpal/desk";
 import type { HomeSnapshot } from "@/lib/posterpal/types";
 import { useShellStore } from "@/lib/store";
 import { formatFanCount, relativeTime } from "@/lib/utils";
@@ -177,6 +178,7 @@ function PagesHome() {
                       {p.status === "Published"
                         ? ` · ${p.reactions_count} reactions · ${p.comments_count} comments`
                         : null}
+                      {p.status === "Published" && inGoldenHour(p.published_time) ? " · first hour" : null}
                     </div>
                   </div>
                   <StatusBadge status={p.status} />

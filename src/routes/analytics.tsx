@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { Guard } from "@/components/guard";
@@ -14,6 +14,8 @@ export const Route = createFileRoute("/analytics")({ component: () => <Guard><An
 
 function Analytics() {
   const pageId = useShellStore((s) => s.selectedPageId) ?? undefined;
+  const setPrefill = useShellStore((s) => s.setComposerPrefill);
+  const navigate = useNavigate();
   const [days, setDays] = useState(28);
   const [pack, setPack] = useState<{
     rows: AnalyticsPoint[];
@@ -59,6 +61,10 @@ function Analytics() {
     return [...groups.values()].sort((a, b) => b.reactions / Math.max(1, b.n) - a.reactions / Math.max(1, a.n));
   }, [series]);
 
+  const best = useMemo(() => {
+    return [...series].sort((a, b) => b.reactions + b.comments - (a.reactions + a.comments))[0] ?? null;
+  }, [series]);
+
   return (
     <div className="space-y-4">
       <PageHeader
@@ -86,6 +92,19 @@ function Analytics() {
         >
           Export CSV
         </Button>
+        {best?.message ? (
+          <Button
+            size="sm"
+            variant="outline"
+            title="Open Composer with the highest-engagement caption from this window"
+            onClick={() => {
+              setPrefill({ message: best.message, pageId, mediaType: "Text" });
+              void navigate({ to: "/composer" });
+            }}
+          >
+            Reuse top caption
+          </Button>
+        ) : null}
       </PageHeader>
 
       {pack?.insightsLocked ? (
