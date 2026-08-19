@@ -20,6 +20,7 @@ export function CommandPalette({
   const open = useShellStore((s) => s.commandOpen);
   const setOpen = useShellStore((s) => s.setCommandOpen);
   const setPage = useShellStore((s) => s.setSelectedPageId);
+  const setPrefill = useShellStore((s) => s.setComposerPrefill);
   const navigate = useNavigate();
   const [q, setQ] = useState("");
   const [hits, setHits] = useState<SearchResult | null>(null);
@@ -99,16 +100,39 @@ export function CommandPalette({
               ))}
             </Command.Group>
           ) : null}
-          {hits?.posts.map((p) => (
-            <Command.Item
-              key={p.id}
-              value={`post ${p.message ?? ""}`}
-              onSelect={() => go("/drafts")}
-              className="flex cursor-pointer items-center rounded-md px-3 py-2 text-sm aria-selected:bg-muted"
-            >
-              <span className="truncate">{p.message || "(no caption)"}</span>
-            </Command.Item>
-          ))}
+          {hits?.posts.length ? (
+            <Command.Group heading="Posts" className="text-[11px] font-semibold text-muted-foreground">
+              {hits.posts.map((p) => (
+                <Command.Item
+                  key={p.id}
+                  value={`post ${p.message ?? ""}`}
+                  onSelect={() => {
+                    setPrefill({ message: p.message ?? "", mediaType: "Text" });
+                    go("/composer");
+                  }}
+                  className="flex cursor-pointer items-center rounded-md px-3 py-2 text-sm aria-selected:bg-muted"
+                >
+                  <span className="truncate">{p.message || "(no caption)"}</span>
+                </Command.Item>
+              ))}
+            </Command.Group>
+          ) : null}
+          {hits?.comments.length ? (
+            <Command.Group heading="Comments" className="text-[11px] font-semibold text-muted-foreground">
+              {hits.comments.map((c) => (
+                <Command.Item
+                  key={c.id}
+                  value={`comment ${c.author_name ?? ""} ${c.message}`}
+                  onSelect={() => go("/inbox")}
+                  className="flex cursor-pointer items-center rounded-md px-3 py-2 text-sm aria-selected:bg-muted"
+                >
+                  <span className="truncate">
+                    {c.author_name ?? "Visitor"}: {c.message}
+                  </span>
+                </Command.Item>
+              ))}
+            </Command.Group>
+          ) : null}
         </Command.List>
       </Command>
     </div>

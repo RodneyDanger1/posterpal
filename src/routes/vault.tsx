@@ -5,6 +5,7 @@ import { Guard } from "@/components/guard";
 import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
 import { logsFn, vaultFn } from "@/lib/posterpal/fns";
+import { tokenExpiringSoon } from "@/lib/posterpal/desk";
 import type { SchedulerLogRow, VaultRow } from "@/lib/posterpal/types";
 import { relativeTime } from "@/lib/utils";
 
@@ -44,7 +45,10 @@ function Vault() {
             <li key={v.id} className="rounded-xl bg-card p-4 shadow-card transition-shadow duration-150 hover:shadow-lift">
               <div className="flex items-center justify-between">
                 <div className="font-semibold">{v.name}</div>
-                <Badge variant={v.is_valid ? "success" : "danger"}>{v.is_valid ? "Valid" : "Re-auth required"}</Badge>
+                <div className="flex gap-1">
+                  <Badge variant={v.is_valid ? "success" : "danger"}>{v.is_valid ? "Valid" : "Re-auth required"}</Badge>
+                  {tokenExpiringSoon(v.expires_at) ? <Badge variant="warning">Expires soon</Badge> : null}
+                </div>
               </div>
               <div className="mt-1 text-[13px] text-muted-foreground">
                 Expires {v.expires_at ? relativeTime(v.expires_at) : "unknown"} · scopes {v.scopes ?? "—"}
