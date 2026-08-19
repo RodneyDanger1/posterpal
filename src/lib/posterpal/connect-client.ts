@@ -16,21 +16,29 @@ export function connectFacebookPopup(): Promise<string> {
         reject(new Error("Popup blocked — allow pop-ups, or continue in this tab."));
         return;
       }
+      let settled = false;
+      let closeTimer: number | undefined;
+      const finish = (fn: () => void) => {
+        if (settled) return;
+        settled = true;
+        window.clearInterval(timer);
+        if (closeTimer !== undefined) window.clearTimeout(closeTimer);
+        window.removeEventListener("message", onMsg);
+        fn();
+      };
       const timer = window.setInterval(() => {
-        if (popup.closed) {
-          window.clearInterval(timer);
-          window.removeEventListener("message", onMsg);
-          reject(new Error("Facebook window closed before finishing."));
-        }
+        if (!popup.closed) return;
+        window.clearInterval(timer);
+        closeTimer = window.setTimeout(() => {
+          finish(() => reject(new Error("Facebook window closed before finishing.")));
+        }, 600);
       }, 400);
       const onMsg = (ev: MessageEvent) => {
         if (ev.origin !== window.location.origin) return;
         const data = ev.data as { source?: string; ok?: boolean; message?: string };
         if (data?.source !== "posterpal-facebook") return;
-        window.clearInterval(timer);
-        window.removeEventListener("message", onMsg);
-        if (data.ok) resolve(data.message ?? "Connected");
-        else reject(new Error(data.message ?? "Connect failed"));
+        if (data.ok) finish(() => resolve(data.message ?? "Connected"));
+        else finish(() => reject(new Error(data.message ?? "Connect failed")));
       };
       window.addEventListener("message", onMsg);
     });

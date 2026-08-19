@@ -46,10 +46,14 @@ export const useShellStore = create<ShellState>()(
     }),
     {
       name: "posterpal-shell",
-      partialize: (s) => ({ theme: s.theme }),
+      partialize: (s) => ({ theme: s.theme, selectedPageId: s.selectedPageId }),
       merge: (persisted, current) => {
         const p = (persisted ?? {}) as Partial<ShellState>;
-        return { ...current, theme: p.theme === "dark" ? "dark" : current.theme };
+        return {
+          ...current,
+          theme: p.theme === "dark" ? "dark" : current.theme,
+          selectedPageId: typeof p.selectedPageId === "string" ? p.selectedPageId : current.selectedPageId,
+        };
       },
     },
   ),
