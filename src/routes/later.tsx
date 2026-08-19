@@ -26,6 +26,7 @@ function Later() {
   const navigate = useNavigate();
   const [rows, setRows] = useState<IdeaRow[]>([]);
   const [draft, setDraft] = useState("");
+  const [thisPageOnly, setThisPageOnly] = useState(false);
 
   const load = () => {
     void ideasFn({ data: {} })
@@ -37,8 +38,9 @@ function Later() {
   const sorted = useMemo(() => {
     const mine = rows.filter((r) => r.page_id && r.page_id === pageId);
     const rest = rows.filter((r) => !r.page_id || r.page_id !== pageId);
-    return [...mine, ...rest];
-  }, [rows, pageId]);
+    const ordered = [...mine, ...rest];
+    return thisPageOnly ? mine : ordered;
+  }, [rows, pageId, thisPageOnly]);
 
   return (
     <div className="space-y-4">
@@ -46,7 +48,11 @@ function Later() {
         title="Later"
         line="Scratch pad for captions. Nothing here is posted."
         hint="Save captions and ideas here, then send them to Composer when you are ready. This board never touches Facebook."
-      />
+      >
+        <Button size="sm" variant={thisPageOnly ? "default" : "outline"} onClick={() => setThisPageOnly((v) => !v)}>
+          This Page only
+        </Button>
+      </PageHeader>
 
       <form
         className="rounded-xl bg-card p-4 shadow-card"

@@ -1,10 +1,11 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { Guard } from "@/components/guard";
 import { PageHeader } from "@/components/page-header";
 import { StatusBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cancelPostFn, getPostBundle, listPostsFn, publishNowFn } from "@/lib/posterpal/fns";
 import type { PostRow } from "@/lib/posterpal/types";
@@ -19,15 +20,30 @@ function Drafts() {
   const setPage = useShellStore((s) => s.setSelectedPageId);
   const navigate = useNavigate();
   const [posts, setPosts] = useState<PostRow[]>([]);
+  const [q, setQ] = useState("");
   const load = () => {
     void listPostsFn({ data: { pageId, limit: 100 } }).then(setPosts);
   };
   useEffect(load, [pageId]);
 
+  const needle = q.trim().toLowerCase();
+  const filtered = useMemo(
+    () =>
+      needle
+        ? posts.filter(
+            (p) =>
+              (p.message ?? "").toLowerCase().includes(needle) ||
+              (p.page_name ?? "").toLowerCase().includes(needle) ||
+              p.status.toLowerCase().includes(needle),
+          )
+        : posts,
+    [posts, needle],
+  );
+
   const groups = {
-    drafts: posts.filter((p) => p.status === "LocalDraft" || p.status === "FacebookDraft"),
-    queued: posts.filter((p) => p.status === "LocalScheduled" || p.status === "FacebookScheduled" || p.status === "Publishing"),
-    failed: posts.filter((p) => p.status === "Failed"),
+    drafts: filtered.filter((p) => p.status === "LocalDraft" || p.status === "FacebookDraft"),
+    queued: filtered.filter((p) => p.status === "LocalScheduled" || p.status === "FacebookScheduled" || p.status === "Publishing"),
+    failed: filtered.filter((p) => p.status === "Failed"),
   };
 
   const openInComposer = (p: PostRow) => {
@@ -58,6 +74,12 @@ function Drafts() {
       <PageHeader
         title="Drafts & queue"
         hint="Local drafts stay here until you publish. FacebookScheduled is already on Graph. Failed posts keep their media — Publish now retries the same row, it does not clone a new one."
+      />
+      <Input
+        value={q}
+        onChange={(e) => setQ(e.target.value)}
+        placeholder="Filter by caption, Page, or status"
+        className="max-w-md"
       />
       <Tabs defaultValue="drafts">
         <TabsList>
