@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { Guard } from "@/components/guard";
 import { PageHeader } from "@/components/page-header";
@@ -9,7 +9,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { commentsFn, generateReplyDraftsFn, hideCommentFn, sendReplyFn, syncNowFn } from "@/lib/posterpal/fns";
 import { markCommentHandledFn } from "@/lib/posterpal/fns-handled";
-import { isBuyingIntent } from "@/lib/posterpal/desk";
+import { isBuyingIntent, isStaleComment } from "@/lib/posterpal/desk";
 import type { CommentRow } from "@/lib/posterpal/types";
 import { useShellStore } from "@/lib/store";
 import { copyText, relativeTime } from "@/lib/utils";
@@ -35,6 +35,7 @@ function draftsOf(json: string | null | undefined): string[] {
 function Inbox() {
   const pageId = useShellStore((s) => s.selectedPageId) ?? undefined;
   const [filter, setFilter] = useState<"needs" | "hidden" | "all">("needs");
+  const [buyingOnly, setBuyingOnly] = useState(false);
   const [rows, setRows] = useState<CommentRow[]>([]);
   const [active, setActive] = useState<CommentRow | null>(null);
   const [draft, setDraft] = useState("");
@@ -58,6 +59,11 @@ function Inbox() {
     setDraft(draftsOf(active.reply_drafts_json)[0] ?? "");
   }, [active?.id]);
 
+  const visible = useMemo(
+    () => (buyingOnly ? rows.filter((c) => isBuyingIntent(c.message)) : rows),
+    [rows, buyingOnly],
+  );
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement | null)?.tagName;
@@ -65,17 +71,18 @@ function Inbox() {
       if (e.key !== "j" && e.key !== "k") return;
       e.preventDefault();
       setActive((cur) => {
-        if (rows.length === 0) return cur;
-        const i = Math.max(0, rows.findIndex((c) => c.id === cur?.id));
-        const next = e.key === "j" ? Math.min(rows.length - 1, i + 1) : Math.max(0, i - 1);
-        return rows[next] ?? cur;
+        if (visible.length === 0) return cur;
+        const i = Math.max(0, visible.findIndex((c) => c.id === cur?.id));
+        const next = e.key === "j" ? Math.min(visible.length - 1, i + 1) : Math.max(0, i - 1);
+        return visible[next] ?? cur;
       });
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [rows]);
+  }, [visible]);
 
   const buyCount = rows.filter((c) => isBuyingIntent(c.message)).length;
+  const staleCount = rows.filter((c) => c.needs_reply && isStaleComment(c.created_at)).length;
 
   return (
     <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]">
@@ -105,27 +112,40 @@ function Inbox() {
             {syncing ? "Pulling…" : "Pull from Facebook"}
           </Button>
         </div>
-        {buyCount > 0 ? (
-          <p className="mb-2 text-[12px] text-muted-foreground">{buyCount} look like buying questions in this list.</p>
+        {buyCount > 0 || staleCount > 0 ? (
+          <p className="mb-2 text-[12px] text-muted-foreground">
+            {buyCount > 0 ? `${buyCount} look like buying questions. ` : ""}
+            {staleCount > 0 ? `${staleCount} waiting more than a day.` : ""}
+          </p>
         ) : null}
-        <Tabs value={filter} onValueChange={(v) => setFilter(v as typeof filter)}>
-          <TabsList>
-            <TabsTrigger value="needs" title="Comments that still need a human reply">
-              Needs reply
-            </TabsTrigger>
-            <TabsTrigger value="hidden" title="Comments you hid on Graph (is_hidden=true)">
-              Hidden
-            </TabsTrigger>
-            <TabsTrigger value="all" title="Every imported comment for the selected Page">
-              All
-            </TabsTrigger>
-          </TabsList>
-        </Tabs>
+        <div className="flex flex-wrap items-center gap-2">
+          <Tabs value={filter} onValueChange={(v) => setFilter(v as typeof filter)}>
+            <TabsList>
+              <TabsTrigger value="needs" title="Comments that still need a human reply">
+                Needs reply
+              </TabsTrigger>
+              <TabsTrigger value="hidden" title="Comments you hid on Graph (is_hidden=true)">
+                Hidden
+              </TabsTrigger>
+              <TabsTrigger value="all" title="Every imported comment for the selected Page">
+                All
+              </TabsTrigger>
+            </TabsList>
+          </Tabs>
+          <Button
+            size="sm"
+            variant={buyingOnly ? "default" : "outline"}
+            onClick={() => setBuyingOnly((v) => !v)}
+            title="Show only comments that look like shop questions"
+          >
+            Buying only
+          </Button>
+        </div>
         <ul className="mt-3 space-y-1">
-          {rows.length === 0 ? (
+          {visible.length === 0 ? (
             <li className="rounded-xl bg-card p-4 text-sm text-muted-foreground shadow-card">Inbox zero for this filter.</li>
           ) : (
-            rows.map((c) => (
+            visible.map((c) => (
               <li key={c.id}>
                 <button
                   type="button"
@@ -141,6 +161,7 @@ function Inbox() {
                     {c.sentiment ? <Badge variant="muted">{c.sentiment}</Badge> : null}
                     {c.needs_reply ? <Badge variant="warning">Needs reply</Badge> : null}
                     {isBuyingIntent(c.message) ? <Badge variant="warning">Buying?</Badge> : null}
+                    {c.needs_reply && isStaleComment(c.created_at) ? <Badge variant="danger">24h+</Badge> : null}
                   </div>
                 </button>
               </li>
@@ -236,7 +257,19 @@ function Inbox() {
                   );
                 }}
               >
-                Copy
+                Copy comment
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                disabled={!draft.trim()}
+                onClick={() => {
+                  void copyText(draft).then((ok) =>
+                    toast[ok ? "message" : "error"](ok ? "Reply copied." : "Could not copy."),
+                  );
+                }}
+              >
+                Copy reply
               </Button>
             </div>
           </div>
