@@ -13,7 +13,7 @@ import { Hint } from "@/components/ui/tooltip";
 import { calendarFn, rescheduleFn } from "@/lib/posterpal/fns";
 import { nextEmptyDay, toLocalInput } from "@/lib/posterpal/desk";
 import { useShellStore } from "@/lib/store";
-import { cn } from "@/lib/utils";
+import { cn, copyText } from "@/lib/utils";
 
 export const Route = createFileRoute("/calendar")({ component: () => <Guard><CalendarView /></Guard> });
 
@@ -109,6 +109,14 @@ function CalendarView() {
     setCursor((d) => (mode === "week" ? addDays(d, dir * 7) : addMonths(d, dir)));
   };
 
+  const copyDay = (items: CalPost[], day: Date) => {
+    const body = items
+      .map((p) => `${format(whenOf(p), "h:mm a")} · ${p.page_name} · ${p.message ?? "(no caption)"}`)
+      .join("\n");
+    const text = `${format(day, "EEE MMM d")}\n${body}`;
+    void copyText(text).then((ok) => toast[ok ? "success" : "error"](ok ? "Day copied." : "Could not copy."));
+  };
+
   return (
     <div className="space-y-4">
       <PageHeader
@@ -182,7 +190,15 @@ function CalendarView() {
                 >
                   <div className="flex items-center justify-between text-[12px] tabular-nums">
                     <span>{format(day, "d")}</span>
-                    {heatVal ? <span className="text-muted-foreground">{heatVal.count}</span> : (
+                    {items.length > 0 ? (
+                      <button
+                        type="button"
+                        className="text-[11px] text-muted-foreground underline"
+                        onClick={() => copyDay(items, day)}
+                      >
+                        copy
+                      </button>
+                    ) : (
                       <button
                         type="button"
                         className="text-[11px] text-muted-foreground underline"
