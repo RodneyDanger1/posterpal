@@ -1,6 +1,6 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { BookmarkPlus, Trash2 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { Guard } from "@/components/guard";
 import { PageHeader } from "@/components/page-header";
@@ -28,15 +28,24 @@ function Later() {
   const [draft, setDraft] = useState("");
 
   const load = () => {
-    void ideasFn({ data: {} }).then(setRows);
+    void ideasFn({ data: {} })
+      .then(setRows)
+      .catch((e: unknown) => toast.error(e instanceof Error ? e.message : "Could not load Later"));
   };
   useEffect(load, []);
+
+  const sorted = useMemo(() => {
+    const mine = rows.filter((r) => r.page_id && r.page_id === pageId);
+    const rest = rows.filter((r) => !r.page_id || r.page_id !== pageId);
+    return [...mine, ...rest];
+  }, [rows, pageId]);
 
   return (
     <div className="space-y-4">
       <PageHeader
         title="Later"
-        hint="Scratch pad — not a Facebook post. Save captions and ideas here, then send them to Composer when you are ready. Nothing on this board is published."
+        line="Scratch pad for captions. Nothing here is posted."
+        hint="Save captions and ideas here, then send them to Composer when you are ready. This board never touches Facebook."
       />
 
       <form
@@ -76,16 +85,17 @@ function Later() {
         </div>
       </form>
 
-      {rows.length === 0 ? (
+      {sorted.length === 0 ? (
         <p className="text-sm text-muted-foreground">Nothing parked yet. Save from here or from Composer.</p>
       ) : (
         <ul className="space-y-2">
-          {rows.map((idea) => (
-            <li key={idea.id} className="rounded-xl bg-card p-4 shadow-card">
+          {sorted.map((idea) => (
+            <li key={idea.id} className="rounded-xl bg-card p-4 shadow-card transition-shadow duration-150 hover:shadow-lift">
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
                   <div className="text-[12px] text-muted-foreground">
                     {idea.page_name ?? "Any Page"} · {idea.media_type} · {relativeTime(idea.created_at)}
+                    {idea.page_id && idea.page_id === pageId ? " · this Page" : ""}
                   </div>
                   <h2 className="mt-1 font-semibold">{idea.title}</h2>
                   <p className="mt-1 whitespace-pre-wrap text-sm">{idea.body}</p>
@@ -112,7 +122,9 @@ function Later() {
                       size="sm"
                       variant="outline"
                       onClick={() => {
-                        void deleteIdeaFn({ data: { id: idea.id } }).then(load);
+                        void deleteIdeaFn({ data: { id: idea.id } })
+                          .then(load)
+                          .catch((e: unknown) => toast.error(e instanceof Error ? e.message : "Could not delete"));
                       }}
                     >
                       <Trash2 className="mr-1 size-3.5" />
