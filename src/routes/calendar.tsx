@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { addDays, addMonths, endOfMonth, endOfWeek, format, isSameDay, startOfMonth, startOfWeek } from "date-fns";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
@@ -11,6 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Hint } from "@/components/ui/tooltip";
 import { calendarFn, rescheduleFn } from "@/lib/posterpal/fns";
+import { nextEmptyDay, toLocalInput } from "@/lib/posterpal/desk";
 import { useShellStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
 
@@ -35,13 +36,10 @@ function whenOf(p: CalPost) {
   return new Date(p.scheduled_publish_time ?? p.published_time ?? p.created_at);
 }
 
-function toLocalInput(d: Date) {
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
-
 function CalendarView() {
   const pageId = useShellStore((s) => s.selectedPageId) ?? undefined;
+  const setPrefill = useShellStore((s) => s.setComposerPrefill);
+  const navigate = useNavigate();
   const [posts, setPosts] = useState<CalPost[]>([]);
   const [cursor, setCursor] = useState(new Date());
   const [mode, setMode] = useState<"month" | "week" | "heat">("month");
@@ -77,6 +75,14 @@ function CalendarView() {
     return map;
   }, [posts]);
 
+  const composeOn = (day: Date) => {
+    const slot = new Date(day);
+    slot.setHours(10, 0, 0, 0);
+    if (slot.getTime() < Date.now() + 15 * 60 * 1000) slot.setTime(Date.now() + 15 * 60 * 1000);
+    setPrefill({ message: "", pageId, when: toLocalInput(slot) });
+    void navigate({ to: "/composer" });
+  };
+
   const dropOn = (day: Date) => {
     if (!dragId) return;
     const iso = new Date(day);
@@ -107,7 +113,7 @@ function CalendarView() {
     <div className="space-y-4">
       <PageHeader
         title="Calendar"
-        hint="Drag a post onto a day, then pick the time. Facebook accepts 10 minutes–30 days. Outside that window the local scheduler keeps it until this desk is open. Blue = Facebook scheduled, grey = local, green = already published."
+        hint="Drag a post onto a day, then pick the time. Click an empty day to open Composer at 10am. Facebook accepts 10 minutes–30 days. Outside that window the local scheduler keeps it until this desk is open."
       >
         <Hint label="Previous month or week">
           <Button variant="outline" size="sm" onClick={() => shift(-1)}>Prev</Button>
@@ -117,6 +123,19 @@ function CalendarView() {
         </Hint>
         <Hint label="Next month or week">
           <Button variant="outline" size="sm" onClick={() => shift(1)}>Next</Button>
+        </Hint>
+        <Hint label="First day with no scheduled or published post">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              const d = nextEmptyDay(posts.map((p) => whenOf(p).toISOString()));
+              setCursor(d);
+              toast.message(`Next empty day is ${format(d, "EEE MMM d")}.`);
+            }}
+          >
+            Next empty day
+          </Button>
         </Hint>
         <Tabs value={mode} onValueChange={(v) => setMode(v as typeof mode)}>
           <TabsList>
@@ -152,6 +171,9 @@ function CalendarView() {
                   key={day.toISOString()}
                   onDragOver={(e) => e.preventDefault()}
                   onDrop={() => dropOn(day)}
+                  onDoubleClick={() => {
+                    if (items.length === 0) composeOn(day);
+                  }}
                   className={cn(
                     "min-h-28 border-b border-r border-border p-1.5",
                     day.getMonth() !== cursor.getMonth() && mode === "month" ? "bg-muted/40" : "",
@@ -160,7 +182,15 @@ function CalendarView() {
                 >
                   <div className="flex items-center justify-between text-[12px] tabular-nums">
                     <span>{format(day, "d")}</span>
-                    {heatVal ? <span className="text-muted-foreground">{heatVal.count}</span> : null}
+                    {heatVal ? <span className="text-muted-foreground">{heatVal.count}</span> : (
+                      <button
+                        type="button"
+                        className="text-[11px] text-muted-foreground underline"
+                        onClick={() => composeOn(day)}
+                      >
+                        +
+                      </button>
+                    )}
                   </div>
                   <div className="mt-1 space-y-1">
                     {items.map((p) => (
