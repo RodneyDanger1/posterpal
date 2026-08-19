@@ -28,6 +28,8 @@ export const Route = createFileRoute("/settings")({ component: () => <Guard><Set
 function Settings() {
   const theme = useShellStore((s) => s.theme);
   const setTheme = useShellStore((s) => s.setTheme);
+  const selectedPageId = useShellStore((s) => s.selectedPageId);
+  const setSelectedPageId = useShellStore((s) => s.setSelectedPageId);
   const [settings, setSettings] = useState<SettingsBag | null>(null);
   const [pages, setPages] = useState<PageRow[]>([]);
   const [appId, setAppId] = useState("");
@@ -36,7 +38,7 @@ function Settings() {
   const [block, setBlock] = useState(20);
   const [voice, setVoice] = useState("");
   const [busy, setBusy] = useState(false);
-  const pageId = useShellStore((s) => s.selectedPageId);
+  const pageId = selectedPageId;
 
   useEffect(() => {
     void getSettingsFn().then((s) => {
@@ -44,9 +46,10 @@ function Settings() {
       setAppId(s.facebookAppId);
       setWarn(s.cadenceWarn);
       setBlock(s.cadenceBlock);
+      if (s.defaultPageId) setSelectedPageId(s.defaultPageId);
     });
     void listPagesFn().then(setPages);
-  }, []);
+  }, [setSelectedPageId]);
 
   useEffect(() => {
     const p = pages.find((x) => x.id === pageId);
@@ -75,6 +78,30 @@ function Settings() {
             }}
           />
         </label>
+      </section>
+
+      <section className="rounded-xl bg-card p-4 shadow-card">
+        <h2 className="font-semibold">Default Page</h2>
+        <p className="mt-1 text-[13px] text-muted-foreground">
+          Composer, Calendar, and Inbox open on this Page after a restart.
+        </p>
+        <select
+          className="mt-3 h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
+          value={pageId ?? ""}
+          onChange={(e) => {
+            const id = e.target.value || null;
+            setSelectedPageId(id);
+            void savePrefs({ data: { defaultPageId: id } }).then(() => toast.success("Default Page saved"));
+          }}
+        >
+          <option value="">No default</option>
+          {pages.map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.name}
+              {p.is_practice ? " (practice)" : ""}
+            </option>
+          ))}
+        </select>
       </section>
 
       <section className="rounded-xl bg-card p-4 shadow-card">
