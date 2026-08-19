@@ -97,3 +97,53 @@ export function trimHashtags(text: string, keep = 3): string {
     .replace(/[ \t]+\n/g, "\n")
     .trim();
 }
+
+export function extractHashtags(text: string): string[] {
+  const tags = text.match(/#[\p{L}\p{N}_]+/gu) ?? [];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const tag of tags) {
+    const key = tag.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(tag);
+  }
+  return out;
+}
+
+/** Question, link, or a verb that asks the reader to do something. */
+export function hasCallToAction(text: string): boolean {
+  return /\?|https?:\/\/|\b(shop|buy|order|comment|tell me|drop a|which one|grab|today only|link in|dm me|tap|click)\b/i.test(
+    text,
+  );
+}
+
+export function isStaleComment(iso: string | null | undefined, now = Date.now(), hours = 24): boolean {
+  if (!iso) return false;
+  const t = new Date(iso).getTime();
+  if (Number.isNaN(t)) return false;
+  return now - t >= hours * 60 * 60 * 1000;
+}
+
+export function hourKey(isoOrLocal: string): string | null {
+  const m = /^(\d{4}-\d{2}-\d{2})T(\d{2})/.exec(isoOrLocal);
+  if (m) return `${m[1]}T${m[2]}`;
+  const d = new Date(isoOrLocal);
+  if (Number.isNaN(d.getTime())) return null;
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}`;
+}
+
+export function tokenExpiringSoon(iso: string | null | undefined, now = Date.now(), days = 7): boolean {
+  if (!iso) return false;
+  const t = new Date(iso).getTime();
+  if (Number.isNaN(t)) return false;
+  const left = t - now;
+  return left > 0 && left <= days * 24 * 60 * 60 * 1000;
+}
+
+export function isOverdue(iso: string | null | undefined, now = Date.now()): boolean {
+  if (!iso) return false;
+  const t = new Date(iso).getTime();
+  return !Number.isNaN(t) && t < now;
+}
