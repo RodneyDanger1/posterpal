@@ -51,9 +51,22 @@ export async function deleteIdea(userId: string, id: string) {
   return { ok: true as const };
 }
 
+async function ensureSnippets(userId: string) {
+  const sql = await getSql();
+  const snips = await sql<{ n: number }>`select count(*)::int as n from caption_snippets where user_id = ${userId}`;
+  if (Number(snips[0]?.n ?? 0) > 0) return;
+  const pages = await sql<{ id: string }>`select id from pages where user_id = ${userId} order by name limit 1`;
+  const a = pages[0]?.id ?? null;
+  await sql`
+    insert into caption_snippets (id, user_id, page_id, label, body)
+    values
+      (${randomUUID()}, ${userId}, ${a}, ${"Hours block"}, ${"Open 10–6 Tuesday through Saturday, noon–4 Sunday. Closed Monday."}),
+      (${randomUUID()}, ${userId}, ${a}, ${"Staff pick closer"}, ${"Ask Maya at the desk — she will put it in your hands."})
+  `;
+}
+
 export async function listSnippets(userId: string, pageId?: string): Promise<SnippetRow[]> {
-  const { ensureMemory } = await import("./seed");
-  await ensureMemory(userId);
+  await ensureSnippets(userId);
   const sql = await getSql();
   const rows = pageId
     ? await sql<SnippetRow>`
