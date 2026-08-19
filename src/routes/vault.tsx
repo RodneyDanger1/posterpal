@@ -1,9 +1,10 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { Guard } from "@/components/guard";
 import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { logsFn, vaultFn } from "@/lib/posterpal/fns";
 import { tokenExpiringSoon } from "@/lib/posterpal/desk";
 import type { SchedulerLogRow, VaultRow } from "@/lib/posterpal/types";
@@ -20,6 +21,7 @@ export const Route = createFileRoute("/vault")({
 function Vault() {
   const [items, setItems] = useState<VaultRow[]>([]);
   const [logs, setLogs] = useState<SchedulerLogRow[]>([]);
+  const [failedOnly, setFailedOnly] = useState(false);
 
   useEffect(() => {
     void vaultFn()
@@ -29,6 +31,11 @@ function Vault() {
       .then(setLogs)
       .catch((e: unknown) => toast.error(e instanceof Error ? e.message : "Could not load scheduler log"));
   }, []);
+
+  const visibleLogs = useMemo(() => {
+    if (!failedOnly) return logs;
+    return logs.filter((l) => /fail|error/i.test(l.status) || Boolean(l.error_message));
+  }, [logs, failedOnly]);
 
   return (
     <div className="space-y-6">
@@ -59,10 +66,17 @@ function Vault() {
         </ul>
       )}
       <div>
-        <h2 className="text-lg font-semibold">Scheduler log</h2>
-        <p className="mb-2 text-[13px] text-muted-foreground">Failures are never silent — they become Failed + a log row.</p>
-        {logs.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No scheduler attempts yet.</p>
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h2 className="text-lg font-semibold">Scheduler log</h2>
+            <p className="text-[13px] text-muted-foreground">Failures are never silent — they become Failed + a log row.</p>
+          </div>
+          <Button size="sm" variant={failedOnly ? "default" : "outline"} onClick={() => setFailedOnly((v) => !v)}>
+            Failures only
+          </Button>
+        </div>
+        {visibleLogs.length === 0 ? (
+          <p className="text-sm text-muted-foreground">{failedOnly ? "No failed attempts." : "No scheduler attempts yet."}</p>
         ) : (
           <div className="overflow-x-auto rounded-xl bg-card shadow-card">
             <table className="w-full text-left text-[13px]">
@@ -75,7 +89,7 @@ function Vault() {
                 </tr>
               </thead>
               <tbody>
-                {logs.map((l) => (
+                {visibleLogs.map((l) => (
                   <tr key={l.id} className="border-b border-border last:border-0">
                     <td className="px-3 py-2 tabular-nums">{relativeTime(l.attempt_time)}</td>
                     <td className="px-3 py-2">{l.status}</td>

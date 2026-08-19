@@ -2,6 +2,7 @@ import { Command } from "cmdk";
 import { useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import type { PageRow } from "@/lib/posterpal/types";
+import { nextGoodSlot } from "@/lib/posterpal/desk";
 import { useShellStore } from "@/lib/store";
 
 type SearchResult = {
@@ -82,6 +83,16 @@ export function CommandPalette({
                 {label}
               </Command.Item>
             ))}
+            <Command.Item
+              value="go schedule next good slot"
+              onSelect={() => {
+                setPrefill({ message: "", when: nextGoodSlot() });
+                go("/composer");
+              }}
+              className="flex cursor-pointer items-center rounded-md px-3 py-2 text-sm text-foreground aria-selected:bg-muted"
+            >
+              Schedule at next good slot
+            </Command.Item>
           </Command.Group>
           {pages.length > 0 ? (
             <Command.Group heading="Pages" className="text-[11px] font-semibold text-muted-foreground">

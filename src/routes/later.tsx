@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { Guard } from "@/components/guard";
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Hint } from "@/components/ui/tooltip";
 import { deleteIdeaFn, ideasFn, saveIdeaFn } from "@/lib/posterpal/fns";
 import type { IdeaRow } from "@/lib/posterpal/types";
@@ -27,6 +28,7 @@ function Later() {
   const [rows, setRows] = useState<IdeaRow[]>([]);
   const [draft, setDraft] = useState("");
   const [thisPageOnly, setThisPageOnly] = useState(false);
+  const [q, setQ] = useState("");
 
   const load = () => {
     void ideasFn({ data: {} })
@@ -39,8 +41,16 @@ function Later() {
     const mine = rows.filter((r) => r.page_id && r.page_id === pageId);
     const rest = rows.filter((r) => !r.page_id || r.page_id !== pageId);
     const ordered = [...mine, ...rest];
-    return thisPageOnly ? mine : ordered;
-  }, [rows, pageId, thisPageOnly]);
+    const needle = q.trim().toLowerCase();
+    const scoped = thisPageOnly ? mine : ordered;
+    if (!needle) return scoped;
+    return scoped.filter(
+      (r) =>
+        r.body.toLowerCase().includes(needle) ||
+        r.title.toLowerCase().includes(needle) ||
+        (r.page_name ?? "").toLowerCase().includes(needle),
+    );
+  }, [rows, pageId, thisPageOnly, q]);
 
   return (
     <div className="space-y-4">
@@ -53,6 +63,13 @@ function Later() {
           This Page only
         </Button>
       </PageHeader>
+
+      <Input
+        value={q}
+        onChange={(e) => setQ(e.target.value)}
+        placeholder="Search parked ideas"
+        className="max-w-md"
+      />
 
       <form
         className="rounded-xl bg-card p-4 shadow-card"
