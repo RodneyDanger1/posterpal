@@ -8,9 +8,11 @@ import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { commentsFn, generateReplyDraftsFn, hideCommentFn, sendReplyFn, syncNowFn } from "@/lib/posterpal/fns";
+import { markCommentHandledFn } from "@/lib/posterpal/fns-handled";
+import { isBuyingIntent } from "@/lib/posterpal/desk";
 import type { CommentRow } from "@/lib/posterpal/types";
 import { useShellStore } from "@/lib/store";
-import { relativeTime } from "@/lib/utils";
+import { copyText, relativeTime } from "@/lib/utils";
 
 export const Route = createFileRoute("/inbox")({
   component: () => (
@@ -56,6 +58,25 @@ function Inbox() {
     setDraft(draftsOf(active.reply_drafts_json)[0] ?? "");
   }, [active?.id]);
 
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement | null)?.tagName;
+      if (tag === "TEXTAREA" || tag === "INPUT") return;
+      if (e.key !== "j" && e.key !== "k") return;
+      e.preventDefault();
+      setActive((cur) => {
+        if (rows.length === 0) return cur;
+        const i = Math.max(0, rows.findIndex((c) => c.id === cur?.id));
+        const next = e.key === "j" ? Math.min(rows.length - 1, i + 1) : Math.max(0, i - 1);
+        return rows[next] ?? cur;
+      });
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [rows]);
+
+  const buyCount = rows.filter((c) => isBuyingIntent(c.message)).length;
+
   return (
     <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]">
       <div>
@@ -63,7 +84,7 @@ function Inbox() {
           <PageHeader
             title="Inbox"
             line="AI may draft. You click Send — nothing auto-comments."
-            hint="PosterPal never auto-likes, auto-follows, or auto-posts comments. Pull from Facebook imports live comments on posts this desk knows about."
+            hint="j/k moves the list. Mark handled clears the queue without a Graph reply. Pull from Facebook imports live comments on posts this desk knows about."
           />
           <Button
             size="sm"
@@ -84,6 +105,9 @@ function Inbox() {
             {syncing ? "Pulling…" : "Pull from Facebook"}
           </Button>
         </div>
+        {buyCount > 0 ? (
+          <p className="mb-2 text-[12px] text-muted-foreground">{buyCount} look like buying questions in this list.</p>
+        ) : null}
         <Tabs value={filter} onValueChange={(v) => setFilter(v as typeof filter)}>
           <TabsList>
             <TabsTrigger value="needs" title="Comments that still need a human reply">
@@ -116,6 +140,7 @@ function Inbox() {
                   <div className="mt-1 flex gap-1">
                     {c.sentiment ? <Badge variant="muted">{c.sentiment}</Badge> : null}
                     {c.needs_reply ? <Badge variant="warning">Needs reply</Badge> : null}
+                    {isBuyingIntent(c.message) ? <Badge variant="warning">Buying?</Badge> : null}
                   </div>
                 </button>
               </li>
@@ -131,6 +156,11 @@ function Inbox() {
           </div>
           <h2 className="mt-1 font-semibold">{active.author_name}</h2>
           <p className="mt-2 text-[15px]">{active.message}</p>
+          {isBuyingIntent(active.message) ? (
+            <p className="mt-2 rounded-md bg-warning/20 px-2 py-1 text-[12px]">
+              Sounds like a shop question. A merch link in the reply often closes it.
+            </p>
+          ) : null}
           <div className="mt-4 space-y-2">
             <div className="flex flex-wrap gap-2">
               {draftsOf(active.reply_drafts_json).map((d, i) => (
@@ -181,6 +211,32 @@ function Inbox() {
                 }}
               >
                 {active.is_hidden ? "Unhide" : "Hide"}
+              </Button>
+              {active.needs_reply ? (
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    void markCommentHandledFn({ data: { commentId: active.id } })
+                      .then(() => {
+                        toast.success("Marked handled. No reply sent.");
+                        load();
+                      })
+                      .catch((e: unknown) => toast.error(e instanceof Error ? e.message : "Update failed"));
+                  }}
+                >
+                  Mark handled
+                </Button>
+              ) : null}
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  void copyText(active.message).then((ok) =>
+                    toast[ok ? "message" : "error"](ok ? "Comment copied." : "Could not copy."),
+                  );
+                }}
+              >
+                Copy
               </Button>
             </div>
           </div>
