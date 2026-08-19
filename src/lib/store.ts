@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { persist } from "zustand/middleware";
+import { createJSONStorage, persist } from "zustand/middleware";
 
 export type PrefillMedia = {
   fileName: string;
@@ -14,6 +14,7 @@ export type ComposerPrefill = {
   pageId?: string | null;
   mediaType?: string;
   media?: PrefillMedia[];
+  when?: string | null;
 };
 
 type ShellState = {
@@ -26,6 +27,34 @@ type ShellState = {
   composerPrefill: ComposerPrefill | null;
   setComposerPrefill: (p: ComposerPrefill | null) => void;
 };
+
+const memoryStore: Record<string, string> = {};
+
+function iframeSafeStorage(): Storage {
+  try {
+    const probe = "__posterpal_probe";
+    window.localStorage.setItem(probe, "1");
+    window.localStorage.removeItem(probe);
+    return window.localStorage;
+  } catch {
+    return {
+      getItem: (k) => (Object.prototype.hasOwnProperty.call(memoryStore, k) ? memoryStore[k]! : null),
+      setItem: (k, v) => {
+        memoryStore[k] = v;
+      },
+      removeItem: (k) => {
+        delete memoryStore[k];
+      },
+      clear: () => {
+        for (const k of Object.keys(memoryStore)) delete memoryStore[k];
+      },
+      key: (i) => Object.keys(memoryStore)[i] ?? null,
+      get length() {
+        return Object.keys(memoryStore).length;
+      },
+    };
+  }
+}
 
 export const useShellStore = create<ShellState>()(
   persist(
@@ -46,6 +75,7 @@ export const useShellStore = create<ShellState>()(
     }),
     {
       name: "posterpal-shell",
+      storage: createJSONStorage(() => iframeSafeStorage()),
       partialize: (s) => ({ theme: s.theme, selectedPageId: s.selectedPageId }),
       merge: (persisted, current) => {
         const p = (persisted ?? {}) as Partial<ShellState>;
@@ -54,6 +84,11 @@ export const useShellStore = create<ShellState>()(
           theme: p.theme === "dark" ? "dark" : current.theme,
           selectedPageId: typeof p.selectedPageId === "string" ? p.selectedPageId : current.selectedPageId,
         };
+      },
+      onRehydrateStorage: () => (state) => {
+        if (state?.theme && typeof document !== "undefined") {
+          document.documentElement.classList.toggle("dark", state.theme === "dark");
+        }
       },
     },
   ),

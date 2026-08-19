@@ -5,15 +5,16 @@ export function facebookCallbackUri(): string {
   return `${window.location.origin}/api/facebook/callback`;
 }
 
-/** Open the official Facebook OAuth dialog and resolve when the popup reports back. */
+/** Open the official Facebook OAuth dialog and resolve when the popup reports back.
+ * Never navigate this window to Facebook — the live preview iframe cannot leave the app.
+ */
 export function connectFacebookPopup(): Promise<string> {
   const redirectUri = facebookCallbackUri();
   return beginFacebookOAuth({ data: { redirectUri } }).then(({ url }) => {
     return new Promise<string>((resolve, reject) => {
       const popup = window.open(url, "posterpal-fb", "popup,width=520,height=720");
       if (!popup) {
-        window.location.href = url;
-        reject(new Error("Popup blocked — allow pop-ups, or continue in this tab."));
+        reject(new Error("Popup blocked. Allow pop-ups for this site, then click Connect again."));
         return;
       }
       let settled = false;
