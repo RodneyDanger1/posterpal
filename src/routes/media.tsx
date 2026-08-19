@@ -1,5 +1,5 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { Guard } from "@/components/guard";
 import { PageHeader } from "@/components/page-header";
@@ -19,10 +19,27 @@ function Media() {
   const [rows, setRows] = useState<MediaLibraryItem[]>([]);
   const [prompt, setPrompt] = useState("");
   const [busy, setBusy] = useState(false);
+  const [kind, setKind] = useState<"all" | "photo" | "video">("all");
 
   useEffect(() => {
     void mediaLibraryFn({ data: { pageId } }).then(setRows);
   }, [pageId]);
+
+  const visible = useMemo(() => {
+    if (kind === "all") return rows;
+    if (kind === "photo") {
+      return rows.filter((r) => {
+        const mime = String(r.mime_type ?? "");
+        const k = String(r.media_kind ?? "").toLowerCase();
+        return mime.startsWith("image/") || k.includes("photo") || k.includes("image");
+      });
+    }
+    return rows.filter((r) => {
+      const mime = String(r.mime_type ?? "");
+      const k = String(r.media_kind ?? "").toLowerCase();
+      return mime.startsWith("video/") || k.includes("video") || k.includes("reel");
+    });
+  }, [rows, kind]);
 
   const reuse = (r: MediaLibraryItem) => {
     const dataUrl = typeof r.data_url === "string" ? r.data_url : "";
@@ -52,7 +69,17 @@ function Media() {
       <PageHeader
         title="Media library"
         hint="Files attached to posts on this desk. Generate a still with Grok Imagine, then open Composer to caption and publish. AI images must be disclosed (policy checklist flags created-with-AI)."
-      />
+      >
+        <Button size="sm" variant={kind === "all" ? "default" : "outline"} onClick={() => setKind("all")}>
+          All
+        </Button>
+        <Button size="sm" variant={kind === "photo" ? "default" : "outline"} onClick={() => setKind("photo")}>
+          Photos
+        </Button>
+        <Button size="sm" variant={kind === "video" ? "default" : "outline"} onClick={() => setKind("video")}>
+          Video
+        </Button>
+      </PageHeader>
       <div className="flex flex-wrap items-end gap-2 rounded-xl bg-card p-4 shadow-card">
         <div className="min-w-[220px] flex-1 space-y-1">
           <label className="text-[13px] font-medium" htmlFor="lib-imagine">Generate a photo</label>
@@ -103,11 +130,11 @@ function Media() {
           </Button>
         </Hint>
       </div>
-      {rows.length === 0 ? (
+      {visible.length === 0 ? (
         <p className="text-sm text-muted-foreground">No media yet. Drop files in Composer or generate one above.</p>
       ) : (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
-          {rows.map((r) => (
+          {visible.map((r) => (
             <figure key={String(r.id)} className="overflow-hidden rounded-xl bg-card shadow-card">
               {typeof r.data_url === "string" && (String(r.data_url).startsWith("data:image") || String(r.data_url).startsWith("http")) ? (
                 <img src={String(r.data_url)} alt={String(r.alt_text ?? r.file_name)} className="aspect-square w-full object-cover" />
