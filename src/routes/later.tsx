@@ -9,7 +9,7 @@ import { Hint } from "@/components/ui/tooltip";
 import { deleteIdeaFn, ideasFn, saveIdeaFn } from "@/lib/posterpal/fns";
 import type { IdeaRow } from "@/lib/posterpal/types";
 import { useShellStore } from "@/lib/store";
-import { relativeTime } from "@/lib/utils";
+import { copyText, relativeTime } from "@/lib/utils";
 
 export const Route = createFileRoute("/later")({
   component: () => (
@@ -115,6 +115,19 @@ function Later() {
                       }}
                     >
                       Open in Composer
+                    </Button>
+                  </Hint>
+                  <Hint label="Copy the idea text.">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => {
+                        void copyText(idea.body).then((ok) =>
+                          toast[ok ? "success" : "error"](ok ? "Copied." : "Could not copy."),
+                        );
+                      }}
+                    >
+                      Copy
                     </Button>
                   </Hint>
                   <Hint label="Removes this idea from Later. Does not affect Facebook.">
