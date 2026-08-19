@@ -5,12 +5,7 @@ import { PosterPalMark } from "@/components/app-shell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  completeSetup,
-  getSettingsFn,
-  saveFacebookApp,
-  startPractice,
-} from "@/lib/posterpal/fns";
+import { completeSetup, getSettingsFn, saveFacebookApp, startPractice } from "@/lib/posterpal/fns";
 import { connectFacebookPopup, facebookCallbackUri } from "@/lib/posterpal/connect-client";
 import { REQUIRED_SCOPES } from "@/lib/posterpal/constants";
 import { FacebookNameHelp } from "@/components/facebook-name-help";
@@ -35,9 +30,11 @@ function SetupWizard() {
 
   useEffect(() => {
     setRedirect(facebookCallbackUri());
-    void getSettingsFn().then((s) => {
-      setAppId(s.facebookAppId);
-    });
+    void getSettingsFn()
+      .then((s) => {
+        setAppId(s.facebookAppId);
+      })
+      .catch(() => undefined);
   }, []);
 
   const saveCreds = async () => {
@@ -80,8 +77,12 @@ function SetupWizard() {
   };
 
   const finish = async () => {
-    await completeSetup();
-    void navigate({ to: "/" });
+    try {
+      await completeSetup();
+      void navigate({ to: "/" });
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not finish setup");
+    }
   };
 
   return (
@@ -94,16 +95,36 @@ function SetupWizard() {
         </div>
       </div>
 
+      <div className="mb-5 flex gap-1.5" aria-hidden>
+        {[1, 2, 3, 4].map((n) => (
+          <div
+            key={n}
+            className={`h-1.5 flex-1 rounded-full transition-colors duration-200 ${n <= step ? "bg-primary" : "bg-muted"}`}
+          />
+        ))}
+      </div>
+
       {step === 1 ? (
         <Panel
           title="How PosterPal talks to Facebook"
           body="This desk is yours — no Google or X account required. Create a Facebook App at developers.facebook.com. Keep it in Development Mode and add yourself as Admin, Developer, or Tester — App Review is not required for role users. Products: Facebook Login with Client OAuth Login and Web OAuth Login on."
         >
           <ol className="list-decimal space-y-2 pl-5 text-sm text-muted-foreground">
-            <li>Valid OAuth Redirect URI (this app): <code className="rounded bg-muted px-1 text-foreground">{redirect || `${typeof window !== "undefined" ? window.location.origin : ""}/api/facebook/callback`}</code></li>
-            <li>Desktop WPF build uses the loopback URI <code className="rounded bg-muted px-1 text-foreground">http://127.0.0.1:55443/callback/</code></li>
+            <li>
+              Valid OAuth Redirect URI (this app):{" "}
+              <code className="rounded bg-muted px-1 text-foreground">
+                {redirect || `${typeof window !== "undefined" ? window.location.origin : ""}/api/facebook/callback`}
+              </code>
+            </li>
+            <li>
+              Desktop WPF build uses the loopback URI{" "}
+              <code className="rounded bg-muted px-1 text-foreground">http://127.0.0.1:55443/callback/</code>
+            </li>
             <li>Permissions: {REQUIRED_SCOPES.join(", ")}</li>
-            <li>Page tokens come from <code className="rounded bg-muted px-1">/me/accounts</code>. CREATE_CONTENT is required to publish; ANALYZE-only Pages import as read-only.</li>
+            <li>
+              Page tokens come from <code className="rounded bg-muted px-1">/me/accounts</code>. CREATE_CONTENT is
+              required to publish; ANALYZE-only Pages import as read-only.
+            </li>
           </ol>
           <FacebookNameHelp />
           <div className="mt-5 flex flex-wrap gap-2">
@@ -124,7 +145,13 @@ function SetupWizard() {
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="secret">App Secret</Label>
-              <Input id="secret" type="password" value={appSecret} onChange={(e) => setAppSecret(e.target.value)} placeholder="Paste secret" />
+              <Input
+                id="secret"
+                type="password"
+                value={appSecret}
+                onChange={(e) => setAppSecret(e.target.value)}
+                placeholder="Paste secret"
+              />
             </div>
           </div>
           <div className="mt-5 flex gap-2">
@@ -139,7 +166,10 @@ function SetupWizard() {
       ) : null}
 
       {step === 3 ? (
-        <Panel title="Connect Facebook" body="Opens the official OAuth dialog in a popup. We exchange the code, request a long-lived user token, then import Pages from /me/accounts.">
+        <Panel
+          title="Connect Facebook"
+          body="Opens the official OAuth dialog in a popup. We exchange the code, request a long-lived user token, then import Pages from /me/accounts."
+        >
           <p className="text-[13px] text-muted-foreground">
             Redirect URI that must be on the app: <code className="rounded bg-muted px-1 text-foreground">{redirect}</code>
           </p>
@@ -155,7 +185,10 @@ function SetupWizard() {
       ) : null}
 
       {step === 4 ? (
-        <Panel title="You are in" body="Optional: add AI later in Settings. Captions, hashtags, and reply drafts use Grok when the platform key is present — they never auto-send comments.">
+        <Panel
+          title="You are in"
+          body="Optional: add AI later in Settings. Captions, hashtags, and reply drafts use Grok when the platform key is present — they never auto-send comments."
+        >
           <div className="mt-5 flex gap-2">
             <Button onClick={() => void finish()}>Open PosterPal</Button>
           </div>
