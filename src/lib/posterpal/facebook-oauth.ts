@@ -133,6 +133,7 @@ export async function importFacebookAccounts(userId: string, userToken: string, 
     const existing = await sql<{ id: string }>`
       select id from pages where user_id = ${userId} and facebook_page_id = ${acct.id}
     `;
+    const tokenEnc = acct.access_token ? encryptSecret(acct.access_token) : null;
     if (existing[0]) {
       await sql`
         update pages set
@@ -140,7 +141,7 @@ export async function importFacebookAccounts(userId: string, userToken: string, 
           category = ${acct.category ?? null},
           fan_count = ${acct.fan_count ?? 0},
           tasks_json = ${JSON.stringify(tasks)},
-          access_token_enc = ${acct.access_token ? encryptSecret(acct.access_token) : null},
+          access_token_enc = coalesce(${tokenEnc}, access_token_enc),
           is_read_only = ${!canCreate},
           is_practice = false,
           updated_at = now()
@@ -154,7 +155,7 @@ export async function importFacebookAccounts(userId: string, userToken: string, 
         ) values (
           ${randomUUID()}, ${userId}, ${acct.id}, ${acct.name}, ${acct.category ?? null},
           ${acct.fan_count ?? 0}, ${JSON.stringify(tasks)},
-          ${acct.access_token ? encryptSecret(acct.access_token) : null},
+          ${tokenEnc},
           true, ${!canCreate}, false
         )
       `;
@@ -185,7 +186,7 @@ function htmlClose(message: string, ok = false): Response {
   <p>${escapeHtml(message)}</p>
   <script>
     try { window.opener && window.opener.postMessage(${payload}, window.location.origin); } catch (e) {}
-    setTimeout(function(){ window.close(); }, 400);
+    setTimeout(function(){ window.close(); }, 800);
   </script>
   </body></html>`;
   return new Response(body, {
