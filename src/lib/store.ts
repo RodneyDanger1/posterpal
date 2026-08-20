@@ -14,7 +14,7 @@ export type ComposerPrefill = {
   pageId?: string | null;
   mediaType?: string;
   media?: PrefillMedia[];
-  when?: string;
+  when?: string | null;
   link?: string;
 };
 
@@ -95,7 +95,7 @@ export const useShellStore = create<ShellState>()(
       selectedPageId: null,
       setSelectedPageId: (id) => set({ selectedPageId: id }),
       commandOpen: false,
-      setCommandOpen: (open) => set({ commandOpen: open }),
+      setCommandOpen: (open: boolean) => set({ commandOpen: open }),
       theme: "light",
       setTheme: (t) => {
         applyThemeClass(t);
@@ -108,6 +108,14 @@ export const useShellStore = create<ShellState>()(
       name: "posterpal-shell",
       storage: createJSONStorage(() => iframeSafeStorage()),
       partialize: (s) => ({ theme: s.theme, selectedPageId: s.selectedPageId }),
+      merge: (persisted, current) => {
+        const p = (persisted ?? {}) as Partial<ShellState>;
+        return {
+          ...current,
+          theme: p.theme === "dark" ? "dark" : current.theme,
+          selectedPageId: typeof p.selectedPageId === "string" ? p.selectedPageId : current.selectedPageId,
+        };
+      },
       onRehydrateStorage: () => (state) => {
         if (state?.theme) applyThemeClass(state.theme);
       },
@@ -115,7 +123,7 @@ export const useShellStore = create<ShellState>()(
   ),
 );
 
-/** Drop a persisted Page id that no longer exists (PGLite reseeds on restart). */
+/** Drop a Page id that no longer exists so rail, Composer, and lists stay in sync. */
 export function adoptLivePageId(pageIds: string[], preferred?: string | null) {
   const ids = new Set(pageIds);
   const current = useShellStore.getState().selectedPageId;

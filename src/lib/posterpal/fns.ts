@@ -2,6 +2,11 @@ import { createServerFn } from "@tanstack/react-start";
 import { authMiddleware } from "@/lib/auth/middleware";
 import type { ComposerInput } from "./types";
 
+async function livePage(userId: string, pageId?: string | null) {
+  const { resolvePageId } = await import("./page-id");
+  return pageId ? resolvePageId(userId, pageId) : pageId ?? undefined;
+}
+
 export const bootstrapApp = createServerFn({ method: "GET" })
   .middleware([authMiddleware])
   .handler(async ({ context }) => {
@@ -83,7 +88,8 @@ export const listPostsFn = createServerFn({ method: "GET" })
   .validator((d: { pageId?: string; status?: string; limit?: number }) => d)
   .handler(async ({ context, data }) => {
     const ops = await import("./ops");
-    return ops.listPosts(context.userId, data);
+    const pageId = await livePage(context.userId, data.pageId);
+    return ops.listPosts(context.userId, { ...data, pageId });
   });
 
 export const getPostBundle = createServerFn({ method: "GET" })
@@ -99,7 +105,8 @@ export const cadenceFn = createServerFn({ method: "GET" })
   .validator((d: { pageId: string }) => d)
   .handler(async ({ context, data }) => {
     const ops = await import("./ops");
-    return ops.cadence(context.userId, data.pageId);
+    const pageId = (await livePage(context.userId, data.pageId)) ?? data.pageId;
+    return ops.cadence(context.userId, pageId);
   });
 
 export const policyFn = createServerFn({ method: "POST" })
@@ -125,7 +132,8 @@ export const composeFn = createServerFn({ method: "POST" })
   .validator((d: ComposerInput) => d)
   .handler(async ({ context, data }) => {
     const ops = await import("./ops");
-    return ops.compose(context.userId, data);
+    const pageId = (await livePage(context.userId, data.pageId)) ?? data.pageId;
+    return ops.compose(context.userId, { ...data, pageId });
   });
 
 export const publishNowFn = createServerFn({ method: "POST" })
@@ -140,8 +148,8 @@ export const rescheduleFn = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
   .validator((d: { postId: string; scheduledAt: string }) => d)
   .handler(async ({ context, data }) => {
-    const ops = await import("./ops");
-    return ops.reschedule(context.userId, data);
+    const { rescheduleExisting } = await import("./reschedule");
+    return rescheduleExisting(context.userId, data.postId, data.scheduledAt);
   });
 
 export const cancelPostFn = createServerFn({ method: "POST" })
@@ -157,7 +165,8 @@ export const commentsFn = createServerFn({ method: "GET" })
   .validator((d: { filter: "needs" | "hidden" | "all"; pageId?: string }) => d)
   .handler(async ({ context, data }) => {
     const ops = await import("./ops");
-    return ops.comments(context.userId, data.filter, data.pageId);
+    const pageId = await livePage(context.userId, data.pageId);
+    return ops.comments(context.userId, data.filter, pageId);
   });
 
 export const hideCommentFn = createServerFn({ method: "POST" })
@@ -197,7 +206,8 @@ export const merchFn = createServerFn({ method: "GET" })
   .validator((d: { pageId?: string } = {}) => d)
   .handler(async ({ context, data }) => {
     const ops = await import("./ops");
-    return ops.merch(context.userId, data.pageId);
+    const pageId = await livePage(context.userId, data.pageId);
+    return ops.merch(context.userId, pageId);
   });
 
 export const saveMerchFn = createServerFn({ method: "POST" })
@@ -243,7 +253,8 @@ export const analyticsFn = createServerFn({ method: "GET" })
   .validator((d: { pageId?: string; days: number }) => d)
   .handler(async ({ context, data }) => {
     const ops = await import("./ops");
-    return ops.analytics(context.userId, data);
+    const pageId = await livePage(context.userId, data.pageId);
+    return ops.analytics(context.userId, { ...data, pageId });
   });
 
 export const mediaLibraryFn = createServerFn({ method: "GET" })
@@ -251,7 +262,8 @@ export const mediaLibraryFn = createServerFn({ method: "GET" })
   .validator((d: { pageId?: string } = {}) => d)
   .handler(async ({ context, data }) => {
     const ops = await import("./ops");
-    return ops.mediaLibrary(context.userId, data.pageId);
+    const pageId = await livePage(context.userId, data.pageId);
+    return ops.mediaLibrary(context.userId, pageId);
   });
 
 export const generateVariantsFn = createServerFn({ method: "POST" })
@@ -291,7 +303,8 @@ export const exportCsvFn = createServerFn({ method: "GET" })
   .validator((d: { pageId?: string; days: number }) => d)
   .handler(async ({ context, data }) => {
     const ops = await import("./ops");
-    return ops.exportCsv(context.userId, data);
+    const pageId = await livePage(context.userId, data.pageId);
+    return ops.exportCsv(context.userId, { ...data, pageId });
   });
 
 export const tickFn = createServerFn({ method: "POST" })
@@ -313,7 +326,8 @@ export const calendarFn = createServerFn({ method: "GET" })
   .validator((d: { pageId?: string } = {}) => d)
   .handler(async ({ context, data }) => {
     const ops = await import("./ops");
-    return ops.calendar(context.userId, data.pageId);
+    const pageId = await livePage(context.userId, data.pageId);
+    return ops.calendar(context.userId, pageId);
   });
 
 export const ideasFn = createServerFn({ method: "GET" })

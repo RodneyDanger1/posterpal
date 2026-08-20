@@ -146,7 +146,7 @@ function useComposerState() {
           missingAlt: media.some((m) => !m.altText.trim()),
           createdWithAi: media.some((m) => m.createdWithAi),
         },
-      }).then(setPolicy);
+      }).then(setPolicy).catch(() => setPolicy(null));
     }, 250);
     return () => window.clearTimeout(t);
   }, [message, link, media, merch, selected?.id, selectedMerchId]);
@@ -583,6 +583,7 @@ function Composer() {
                         return;
                       }
                       s.setVariants(r.captions);
+                      if (r.imagePrompt) s.setImagePrompt(r.imagePrompt);
                       if (!s.variantGroupId) s.setVariantGroupId(crypto.randomUUID());
                       toast.success(r.liveSearch ? "Researched. Pick a variant — you still click Send." : "Drafted without live search. Verify facts, then you click Send.");
                     })

@@ -377,7 +377,14 @@ export async function reschedule(userId: string, data: { postId: string; schedul
     };
   }
 
-  const nextStatus = windowNote || post.status === "LocalDraft" || post.status === "FacebookDraft" ? "LocalScheduled" : post.status;
+  const nextStatus =
+    windowNote ||
+    post.status === "LocalDraft" ||
+    post.status === "FacebookDraft" ||
+    post.status === "Failed" ||
+    post.status === "Publishing"
+      ? "LocalScheduled"
+      : post.status;
   await sql`
     update posts set scheduled_publish_time = ${data.scheduledAt}, status = ${nextStatus}, updated_at = now()
     where id = ${data.postId} and user_id = ${userId}

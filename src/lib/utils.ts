@@ -43,29 +43,30 @@ export function pageHue(id: string): string {
   return `hsl(${h} 42% 46%)`;
 }
 
-/** Clipboard that survives the live-preview iframe (third-party cookies block navigator.clipboard). */
+/** Clipboard write that never throws when the preview iframe blocks clipboard. */
 export async function copyText(text: string): Promise<boolean> {
+  const value = text.trim();
+  if (!value) return false;
   try {
     if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
-      await navigator.clipboard.writeText(text);
+      await navigator.clipboard.writeText(value);
       return true;
     }
   } catch {
     /* fall through */
   }
   try {
-    const ta = document.createElement("textarea");
-    ta.value = text;
-    ta.setAttribute("readonly", "");
-    ta.style.position = "fixed";
-    ta.style.left = "-9999px";
-    document.body.appendChild(ta);
-    ta.select();
+    const el = document.createElement("textarea");
+    el.value = value;
+    el.setAttribute("readonly", "");
+    el.style.position = "fixed";
+    el.style.left = "-9999px";
+    document.body.appendChild(el);
+    el.select();
     const ok = document.execCommand("copy");
-    ta.remove();
+    document.body.removeChild(el);
     return ok;
   } catch {
     return false;
   }
 }
-

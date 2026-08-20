@@ -277,7 +277,8 @@ export async function cadenceForPage(userId: string, pageId: string): Promise<Ca
     select count(*)::int as n from posts
     where user_id = ${userId} and page_id = ${pageId}
       and status in ('Published','Publishing','FacebookScheduled','LocalScheduled')
-      and coalesce(published_time, scheduled_publish_time, created_at) > now() - interval '24 hours'
+      and coalesce(published_time, created_at) > now() - interval '24 hours'
+      and coalesce(published_time, created_at) <= now()
   `;
   const postedLast24h = Number(counts[0]?.n ?? 0);
   const level = postedLast24h >= blockAt ? "block" : postedLast24h >= warnAt ? "warn" : "ok";

@@ -51,10 +51,16 @@ export async function saveAndDispatch(userId: string, input: ComposerInput) {
     }
   }
 
+  const scheduled: string | null = input.scheduledAt ?? null;
+  if (input.mode === "schedule") {
+    if (!scheduled) throw new Error("Pick a date and time to schedule.");
+    const when = new Date(scheduled);
+    if (Number.isNaN(when.getTime())) throw new Error("Pick a valid date and time.");
+  }
+
   const sql = await getSql();
   const id = randomUUID();
   let status: string = "LocalDraft";
-  const scheduled: string | null = input.scheduledAt ?? null;
   if (input.mode === "now") status = "Publishing";
   else if (input.mode === "schedule") status = "LocalScheduled";
   else if (input.mode === "fb-draft") status = "LocalDraft";
@@ -91,11 +97,6 @@ export async function saveAndDispatch(userId: string, input: ComposerInput) {
   }
 
   if (input.mode === "schedule") {
-    if (!scheduled) {
-      throw new Error("Pick a date and time to schedule.");
-    }
-    const when = new Date(scheduled);
-    if (Number.isNaN(when.getTime())) throw new Error("Pick a valid date and time.");
     if (input.mediaType === "Story") {
       await recordLog({
         userId,
@@ -111,6 +112,8 @@ export async function saveAndDispatch(userId: string, input: ComposerInput) {
           "Stories expire in 24h and Graph has no schedule for them. Kept on the local scheduler — it publishes when this desk is open and the time hits.",
       };
     }
+    const slot = scheduled ?? "";
+    const when = new Date(slot);
     const windowNote = facebookScheduleWindow(when);
     if (windowNote) {
       await recordLog({ userId, postId: id, status: "local_schedule", error: windowNote, path: "local-scheduler" });
