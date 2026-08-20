@@ -304,7 +304,7 @@ function Settings() {
         <h2 className="font-semibold">AI</h2>
         <p className="mt-1 text-[13px] text-muted-foreground">
           {settings?.hasAiKey
-            ? "Grok is available for captions, hashtags, sentiment, and reply drafts. Paste other keys above to switch models in Composer. Nothing auto-sends."
+            ? "Grok captions + Imagine stills are available. Flux (fal key) is the stills path without a Grok visible watermark. The agent drafts; you publish. Captions do not say they were drafted here."
             : "Grok is unavailable in this environment. Add an OpenAI, Gemini, or DeepSeek key above for captions — or Flux/Gemini/OpenAI for stills."}
         </p>
       </section>
