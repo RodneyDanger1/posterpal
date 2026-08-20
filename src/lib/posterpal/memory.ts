@@ -51,6 +51,18 @@ export async function deleteIdea(userId: string, id: string) {
   return { ok: true as const };
 }
 
+export async function updateIdea(
+  userId: string,
+  data: { id: string; notes?: string | null },
+) {
+  const sql = await getSql();
+  await sql`
+    update saved_ideas set notes = ${data.notes ?? null}
+    where id = ${data.id} and user_id = ${userId}
+  `;
+  return { ok: true as const };
+}
+
 export async function listSnippets(userId: string, pageId?: string): Promise<SnippetRow[]> {
   const { ensureMemory } = await import("./seed");
   await ensureMemory(userId);

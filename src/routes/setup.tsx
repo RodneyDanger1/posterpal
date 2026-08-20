@@ -139,7 +139,7 @@ function SetupWizard() {
       ) : null}
 
       {step === 3 ? (
-        <Panel title="Connect Facebook" body="Opens the official OAuth dialog in a popup. We exchange the code, request a long-lived user token, then import Pages from /me/accounts.">
+        <Panel title="Connect Facebook" body="Opens Facebook Login in a pop-up so this preview frame stays on PosterPal. Allow pop-ups for this site — Facebook cookies cannot run inside the embedded preview.">
           <p className="text-[13px] text-muted-foreground">
             Redirect URI that must be on the app: <code className="rounded bg-muted px-1 text-foreground">{redirect}</code>
           </p>

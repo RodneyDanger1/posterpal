@@ -164,6 +164,71 @@ export async function importFacebookAccounts(userId: string, userToken: string, 
   return imported;
 }
 
+/** Re-exchange a long-lived user token (extends ~60 days) and refresh Page tokens from /me/accounts. */
+export async function refreshVaultTokens(userId: string): Promise<{ refreshed: boolean; warning: string | null }> {
+  const sql = await getSql();
+  const rows = await sql<{
+    id: string;
+    long_lived_token_enc: string | null;
+    expires_at: string | null;
+    last_validated_at: string | null;
+  }>`
+    select id, long_lived_token_enc, expires_at, last_validated_at
+    from token_vault
+    where user_id = ${userId} and is_valid = true
+    order by created_at desc
+    limit 1
+  `;
+  const row = rows[0];
+  if (!row) return { refreshed: false, warning: null };
+  const token = decryptSecret(row.long_lived_token_enc);
+  if (!token) return { refreshed: false, warning: null };
+
+  const appRows = await sql<{ value_plain: string | null; value_enc: string | null }>`
+    select value_plain, value_enc from app_settings where user_id = ${userId} and key = 'facebook_app_id'
+  `;
+  const secretRows = await sql<{ value_plain: string | null; value_enc: string | null }>`
+    select value_plain, value_enc from app_settings where user_id = ${userId} and key = 'facebook_app_secret'
+  `;
+  const appId = appRows[0]?.value_plain ?? decryptSecret(appRows[0]?.value_enc) ?? "";
+  const appSecret = decryptSecret(secretRows[0]?.value_enc) ?? secretRows[0]?.value_plain ?? "";
+  if (!appId || !appSecret) return { refreshed: false, warning: null };
+
+  const now = Date.now();
+  const exp = row.expires_at ? new Date(row.expires_at).getTime() : 0;
+  const last = row.last_validated_at ? new Date(row.last_validated_at).getTime() : 0;
+  const expiringSoon = exp > 0 && exp - now < 21 * 86_400_000;
+  if (now - last < 6 * 60 * 60 * 1000) return { refreshed: false, warning: null };
+  if (!expiringSoon && exp > now) return { refreshed: false, warning: null };
+
+  try {
+    const longTok = await exchangeToken({
+      grant_type: "fb_exchange_token",
+      client_id: appId,
+      client_secret: appSecret,
+      fb_exchange_token: token,
+    });
+    const next = longTok.access_token || token;
+    const expiresAt = longTok.expires_in
+      ? new Date(Date.now() + longTok.expires_in * 1000).toISOString()
+      : row.expires_at;
+    await sql`
+      update token_vault set
+        long_lived_token_enc = ${encryptSecret(next)},
+        expires_at = ${expiresAt},
+        last_validated_at = now(),
+        is_valid = true
+      where id = ${row.id}
+    `;
+    await importFacebookAccounts(userId, next, appSecret);
+    return { refreshed: true, warning: null };
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    await sql`update token_vault set last_validated_at = now() where id = ${row.id}`;
+    return { refreshed: false, warning: msg };
+  }
+}
+
 async function exchangeToken(params: Record<string, string>): Promise<{ access_token?: string; expires_in?: number }> {
   const u = new URL(`${GRAPH_BASE}/oauth/access_token`);
   for (const [k, v] of Object.entries(params)) u.searchParams.set(k, v);

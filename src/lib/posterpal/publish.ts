@@ -91,6 +91,21 @@ export async function saveAndDispatch(userId: string, input: ComposerInput) {
   }
 
   if (input.mode === "schedule") {
+    if (input.mediaType === "Story") {
+      await recordLog({
+        userId,
+        postId: id,
+        status: "story_local_schedule",
+        error: "Stories cannot be scheduled on Graph.",
+        path: "local-scheduler",
+      });
+      return {
+        id,
+        status: "LocalScheduled",
+        warning:
+          "Stories expire in 24h and Graph has no schedule for them. Kept on the local scheduler — it publishes when this desk is open and the time hits.",
+      };
+    }
     const when = scheduled ? new Date(scheduled) : null;
     const windowNote = when ? facebookScheduleWindow(when) : "Pick a time.";
     if (windowNote) {
@@ -106,6 +121,14 @@ export async function saveAndDispatch(userId: string, input: ComposerInput) {
   }
 
   if (input.mode === "fb-draft") {
+    if (input.mediaType === "Story") {
+      await sql`update posts set status = 'LocalDraft', updated_at = now() where id = ${id} and user_id = ${userId}`;
+      return {
+        id,
+        status: "LocalDraft",
+        warning: "Stories have no unpublished Facebook draft. Saved locally.",
+      };
+    }
     const result = await attemptGraphPublish(userId, id, "fb-draft");
     return { id, status: result.status, warning: result.warning };
   }
@@ -116,6 +139,20 @@ export async function saveAndDispatch(userId: string, input: ComposerInput) {
 
 function cadenceMessage(c: { postedLast24h: number; warnAt: number }) {
   return `Cadence warning: ${c.postedLast24h} posts in the last 24h (warn at ${c.warnAt}).`;
+}
+
+async function resolveCommentTarget(graphId: string, token: string, appSecret: string): Promise<string> {
+  try {
+    const meta = await graphFetch<{ id?: string; post_id?: string }>({
+      path: `/${graphId}`,
+      token,
+      appSecret,
+      query: { fields: "id,post_id" },
+    });
+    return meta.data.post_id || meta.data.id || graphId;
+  } catch {
+    return graphId;
+  }
 }
 
 export async function publishExisting(userId: string, postId: string, mode: PublishMode = "now") {
@@ -261,14 +298,15 @@ export async function attemptGraphPublish(
     const firstComment = String(post.first_comment ?? "").trim();
     if (firstComment && graphId && mode === "now") {
       try {
+        const target = await resolveCommentTarget(graphId, token, appSecret);
         await graphFetch({
-          path: `/${graphId}/comments`,
+          path: `/${target}/comments`,
           method: "POST",
           token,
           appSecret,
           form: { message: firstComment },
         });
-        await recordLog({ userId, postId, status: "first_comment_posted", path: `/${graphId}/comments` });
+        await recordLog({ userId, postId, status: "first_comment_posted", path: `/${target}/comments` });
       } catch (e) {
         await recordLog({
           userId,
@@ -342,7 +380,6 @@ async function publishPhoto(ctx: PublishCtx & { item?: ContentItemRow }): Promis
     caption: ctx.message,
     published: ctx.payload.published,
     scheduled_publish_time: ctx.payload.scheduled_publish_time,
-    unpublished_content_type: ctx.payload.unpublished_content_type,
     alt_text_custom: ctx.item.alt_text || undefined,
   };
   if (src.kind === "http") {
@@ -396,7 +433,6 @@ async function publishCarousel(ctx: PublishCtx & { items: ContentItemRow[] }): P
     message: ctx.message,
     published: ctx.payload.published,
     scheduled_publish_time: ctx.payload.scheduled_publish_time,
-    unpublished_content_type: ctx.payload.unpublished_content_type,
   };
   ids.forEach((id, i) => {
     form[`attached_media[${i}]`] = JSON.stringify({ media_fbid: id });
@@ -466,13 +502,16 @@ async function publishReel(ctx: PublishCtx & { item?: ContentItemRow }): Promise
       video_id: videoId,
       video_state: videoState,
       description: ctx.message || undefined,
-      scheduled_publish_time: ctx.scheduledUnix,
+      scheduled_publish_time: videoState === "SCHEDULED" ? ctx.scheduledUnix : undefined,
     },
   });
   return videoId;
 }
 
 async function publishStory(ctx: PublishCtx & { item?: ContentItemRow }): Promise<string | undefined> {
+  if (ctx.mode === "schedule" || ctx.mode === "fb-draft") {
+    throw new Error("Stories cannot be scheduled or saved as Facebook drafts. Use Publish now or the local scheduler.");
+  }
   if (!ctx.item) throw new Error("Story is missing media.");
   const isVideo =
     ctx.item.media_kind === "Video" ||

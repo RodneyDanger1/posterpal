@@ -101,8 +101,8 @@ export function runPolicyChecklist(input: {
     flags.push({
       id: "ai-media",
       severity: "info",
-      title: "AI-media disclosure reminder",
-      detail: "This media was generated with AI. Meta may require an AI-content label — disclose if the image or video is synthetic.",
+      title: "AI still — operator reminder",
+      detail: "This file was generated. Meta may auto-label realistic AI images. Do not present it as a documentary photo of a real event. This reminder stays on the desk — it is not added to the caption.",
     });
   }
 

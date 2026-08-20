@@ -6,7 +6,7 @@ Personal CRM for the Facebook Pages you administer. Compose, schedule, publish, 
 
 **No app login.** This is a single-operator desk. Open it and work. Facebook is optional: connect a Development Mode app only when you want posts to hit a real Page.
 
-**Facebook App name:** do **not** register the Facebook App as “PosterPal”. Meta rejects display names that contain Book / Face / FB / Facebook / Meta. Use **PageDesk**, **ShoreDesk**, or **DeskPages**. This product can still be called PosterPal.
+**Facebook App name:** register it as **PosterPal**. Meta rejects Book / Face / FB / Facebook / Meta. That is why this desk is no longer BookBoss.
 
 ## What you can do here
 

@@ -53,6 +53,12 @@ export async function loadSettings(userId: string, origin: string): Promise<Sett
     cadenceWarn,
     cadenceBlock,
     setupComplete,
+    openaiKey,
+    googleKey,
+    deepseekKey,
+    falKey,
+    defaultTextProvider,
+    defaultImageProvider,
   ] = await Promise.all([
     getSetting(userId, "facebook_app_id"),
     getSetting(userId, "facebook_app_secret"),
@@ -61,17 +67,33 @@ export async function loadSettings(userId: string, origin: string): Promise<Sett
     getSetting(userId, "cadence_warn"),
     getSetting(userId, "cadence_block"),
     getSetting(userId, "setup_complete"),
+    getSetting(userId, "openai_api_key"),
+    getSetting(userId, "google_api_key"),
+    getSetting(userId, "deepseek_api_key"),
+    getSetting(userId, "fal_api_key"),
+    getSetting(userId, "default_text_provider"),
+    getSetting(userId, "default_image_provider"),
   ]);
+  const grok = Boolean(process.env.XAI_API_KEY);
   return {
     facebookAppId: facebookAppId ?? "",
     hasFacebookSecret: Boolean(facebookSecret),
-    hasAiKey: Boolean(process.env.XAI_API_KEY),
+    hasAiKey: grok,
     theme: theme === "dark" ? "dark" : "light",
     defaultPageId,
     cadenceWarn: Number(cadenceWarn ?? 8) || 8,
     cadenceBlock: Number(cadenceBlock ?? 20) || 20,
     setupComplete: setupComplete === "1",
     oauthRedirectUri: `${origin.replace(/\/$/, "")}/api/facebook/callback`,
+    providers: {
+      grok,
+      openai: Boolean(openaiKey),
+      gemini: Boolean(googleKey),
+      deepseek: Boolean(deepseekKey),
+      flux: Boolean(falKey),
+    },
+    defaultTextProvider: defaultTextProvider || (grok ? "grok" : openaiKey ? "openai" : googleKey ? "gemini" : deepseekKey ? "deepseek" : "grok"),
+    defaultImageProvider: defaultImageProvider || (grok ? "grok" : googleKey ? "gemini" : openaiKey ? "openai" : falKey ? "flux" : "grok"),
   };
 }
 

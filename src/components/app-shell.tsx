@@ -14,6 +14,9 @@ import {
   Settings,
   ShoppingBag,
   FileText,
+  Moon,
+  Sparkles,
+  Sun,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
@@ -21,7 +24,7 @@ import { UserButton } from "@/lib/auth/gates";
 import { useCurrentUserState } from "@/lib/auth/use-current-user";
 import { bootstrapApp, searchFn, syncNowFn, tickFn } from "@/lib/posterpal/fns";
 import type { HomeSnapshot, PageRow } from "@/lib/posterpal/types";
-import { useShellStore } from "@/lib/store";
+import { adoptLivePageId, useShellStore } from "@/lib/store";
 import { cn, formatFanCount } from "@/lib/utils";
 import { PageAvatar } from "./page-avatar";
 import { Button } from "./ui/button";
@@ -30,6 +33,7 @@ import { ScrollArea } from "./ui/scroll-area";
 import { Skeleton } from "./ui/skeleton";
 import { Hint } from "./ui/tooltip";
 import { CommandPalette } from "./command-palette";
+import { MobileNav } from "./mobile-nav";
 
 const NAV = [
   { to: "/", label: "Pages", icon: LayoutGrid, hint: "All Pages you administer. Switch here; Composer, Calendar, and Inbox follow the selected Page." },
@@ -38,11 +42,12 @@ const NAV = [
   { to: "/drafts", label: "Drafts", icon: FileText, hint: "Local drafts, Facebook drafts, the scheduler queue, and failed Graph publishes." },
   { to: "/calendar", label: "Calendar", icon: CalendarDays, hint: "Month/week view. Drag a post onto a day, then pick the time. Graph window is 10 minutes–30 days." },
   { to: "/inbox", label: "Inbox", icon: Inbox, hint: "Comments that need a human reply. AI may draft; you click Send. Never auto-comments." },
+  { to: "/agent", label: "Agent", icon: Sparkles, hint: "Researches the public web and drafts captions. Cannot publish, like, follow, or reply." },
   { to: "/analytics", label: "Analytics", icon: BarChart3, hint: "Reactions, comments, shares. Page Insights metrics need 100+ likes on the Page." },
   { to: "/media", label: "Media", icon: ImageIcon, hint: "Files attached to posts, plus Imagine (Grok) image generation." },
   { to: "/merchandise", label: "Merchandise", icon: ShoppingBag, hint: "Product links with UTM. Inserted into Composer as a CTA — you still add a branded-content disclosure." },
   { to: "/vault", label: "Token vault", icon: KeyRound, hint: "Encrypted Facebook user tokens and the scheduler log. Graph 190 means reconnect." },
-  { to: "/settings", label: "Settings", icon: Settings, hint: "Facebook App ID/Secret, cadence caps, brand voice, appearance." },
+  { to: "/settings", label: "Settings", icon: Settings, hint: "Facebook App ID/Secret, BYO AI keys (OpenAI, Gemini, DeepSeek, Flux), cadence caps, brand voice." },
 ] as const;
 
 export function AppShell({ children, right }: { children: React.ReactNode; right?: React.ReactNode }) {
@@ -62,10 +67,7 @@ export function AppShell({ children, right }: { children: React.ReactNode; right
         if (cancelled) return;
         setData(snap);
         if (snap.settings.theme && snap.settings.theme !== theme) setTheme(snap.settings.theme);
-        if (!selectedPageId) {
-          const pick = snap.settings.defaultPageId ?? snap.pages[0]?.id ?? null;
-          if (pick) setSelectedPageId(pick);
-        }
+        adoptLivePageId(snap.pages.map((p) => p.id), snap.settings.defaultPageId);
       })
       .catch((e: unknown) => toast.error(e instanceof Error ? e.message : "Could not load workspace"));
     const t = window.setInterval(() => {
@@ -250,12 +252,22 @@ export function AppShell({ children, right }: { children: React.ReactNode; right
             </Button>
           </Hint>
           <div className="ml-auto flex items-center gap-2">
+            <Hint label={theme === "dark" ? "Light theme" : "Dark theme"}>
+              <Button
+                variant="ghost"
+                size="icon"
+                aria-label="Toggle theme"
+                onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+              >
+                {theme === "dark" ? <Sun className="size-4" /> : <Moon className="size-4" />}
+              </Button>
+            </Hint>
             <UserButton />
           </div>
         </header>
 
         <div className="flex min-h-0 flex-1">
-          <main className="min-w-0 flex-1 overflow-auto p-3 md:p-4">{children}</main>
+          <main className="min-w-0 flex-1 overflow-auto p-3 pb-[calc(4.5rem+env(safe-area-inset-bottom))] md:p-4 md:pb-4">{children}</main>
           {right ? (
             <aside className="hidden w-[320px] shrink-0 overflow-auto border-l border-border bg-card p-4 xl:block">
               {right}
@@ -265,6 +277,7 @@ export function AppShell({ children, right }: { children: React.ReactNode; right
       </div>
 
       <CommandPalette pages={pages} onSearch={(q) => searchFn({ data: { q } })} />
+      <MobileNav inboxCount={data?.inboxCount ?? 0} />
     </div>
   );
 }
@@ -316,7 +329,7 @@ export function PosterPalMark({ size = 28 }: { size?: number }) {
     <svg width={size} height={size} viewBox="0 0 100 100" aria-hidden className="shrink-0">
       <rect width="100" height="100" rx="22" fill="#1877F2" />
       <path
-        d="M28 22h22c12 0 20 7 20 18 0 7-4 13-11 16 9 3 14 10 14 18 0 13-10 20-24 20H28V22zm16 28h8c6 0 10-3 10-8s-4-8-10-8h-8v16zm0 12v16h10c7 0 12-3 12-9s-5-7-12-7h-10z"
+        d="M32 20h26c15 0 26 9 26 22s-11 22-26 22H48v20H32V20zm16 14v16h12c7 0 12-3.5 12-8s-5-8-12-8H48z"
         fill="#fff"
       />
     </svg>

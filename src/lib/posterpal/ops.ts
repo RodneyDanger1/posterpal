@@ -1,8 +1,8 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import { getSql } from "@/lib/db";
-import { analyzeContent, aiAvailable, draftReplies, generateCaptionVariants, generateImage, localSentiment, suggestHashtags } from "./ai";
+import { analyzeContent, aiAvailable, draftReplies, generateCaptionVariants, generateImageWithProvider, localSentiment, suggestHashtags } from "./ai";
 import { GRAPH_VERSION, REQUIRED_SCOPES } from "./constants";
-import { buildAuthorizeUrl, facebookScheduleWindow, graphFetch, GraphRequestError } from "./graph";
+import { buildAuthorizeUrl, facebookScheduleWindow, graphFetch, GraphRequestError, unixSeconds } from "./graph";
 import {
   cadenceForPage,
   getPage,
@@ -23,11 +23,29 @@ import {
   searchAll,
   setSetting,
 } from "./repo";
-import { policyForComposer, publishExisting, saveAndDispatch, tickScheduler } from "./publish";
-import { ensureMemory, seedPracticeWorkspace } from "./seed";
+import { policyForComposer, publishExisting, saveAndDispatch, tickScheduler, attemptGraphPublish } from "./publish";
+import { ensureMemory, ensureOverduePractice, seedPracticeWorkspace } from "./seed";
 import { syncFromGraph } from "./sync";
-import { deleteIdea, deleteSnippet, listIdeas, listSnippets, saveIdea, saveSnippet } from "./memory";
-import type { AnalyticsPoint, ComposerInput, MediaLibraryItem, SyncResult } from "./types";
+import { refreshVaultTokens } from "./facebook-oauth";
+import { deleteIdea, deleteSnippet, listIdeas, listSnippets, saveIdea, saveSnippet, updateIdea } from "./memory";
+import type { ImageProviderId, TextProviderId } from "./providers";
+import type { AnalyticsPoint, ComposerInput, MediaLibraryItem, NeedsItem, SyncResult } from "./types";
+import {
+  createPairingCode as mintPairing,
+  listDevices as listPairedDevices,
+  needsYou,
+  redeemPairingCode,
+  revokeDevice as revokePairedDevice,
+} from "./devices";
+
+async function resolvePageId(userId: string, pageId?: string | null): Promise<string | undefined> {
+  if (pageId) {
+    const page = await getPage(userId, pageId);
+    if (page) return page.id;
+  }
+  const pages = await listPagesRepo(userId);
+  return pages[0]?.id;
+}
 
 function originFromRequest(): string {
   if (typeof process !== "undefined" && process.env.BETTER_AUTH_URL) {
@@ -49,6 +67,7 @@ export async function bootstrapApp(userId: string) {
     pages = await listPagesRepo(userId);
   } else {
     await ensureMemory(userId);
+    await ensureOverduePractice(userId);
   }
   const settings = await loadSettings(userId, origin);
   const recentPosts = await listPostsRepo(userId, { limit: 12 });
@@ -57,6 +76,41 @@ export async function bootstrapApp(userId: string) {
   );
   const quota = await latestQuota(userId);
   const inbox = await inboxCount(userId);
+  let failedCount = 0;
+  let merchCount = 0;
+  let vaultExpiresAt: string | null = null;
+  const mix = { Text: 0, Photo: 0, Carousel: 0, Video: 0, Reel: 0, Story: 0 };
+  try {
+    const sql = await getSql();
+    const failed = await sql<{ n: number }>`
+      select count(*)::int as n from posts where user_id = ${userId} and status = 'Failed'
+    `;
+    failedCount = Number(failed[0]?.n ?? 0);
+    const merchRows = await sql<{ n: number }>`
+      select count(*)::int as n from merchandise_links where user_id = ${userId}
+    `;
+    merchCount = Number(merchRows[0]?.n ?? 0);
+    const vault = await sql<{ expires_at: string | null }>`
+      select expires_at from token_vault where user_id = ${userId} order by created_at desc limit 1
+    `;
+    vaultExpiresAt = vault[0]?.expires_at ?? null;
+    const mixRows = await sql<{ media_type: string; n: number }>`
+      select media_type, count(*)::int as n from posts
+      where user_id = ${userId} and status = 'Published'
+      group by media_type
+    `;
+    for (const row of mixRows) {
+      const k = row.media_type as keyof typeof mix;
+      if (k in mix) mix[k] = Number(row.n ?? 0);
+    }
+  } catch {
+    /* desk extras must not break the shell */
+  }
+  try {
+    await refreshVaultTokens(userId);
+  } catch {
+    /* token refresh must not break the shell */
+  }
   try {
     await tickScheduler(userId);
   } catch {
@@ -69,6 +123,11 @@ export async function bootstrapApp(userId: string) {
     inboxCount: inbox,
     quota,
     settings,
+    failedCount,
+    merchCount,
+    vaultExpiresAt,
+    mix,
+    needs: await needsYouSafe(userId),
   };
 }
 
@@ -84,6 +143,34 @@ export async function saveFacebookApp(userId: string, data: { appId: string; app
     await setSetting(userId, "facebook_app_secret", data.appSecret.trim(), true);
   }
   return { ok: true as const };
+}
+
+export async function saveAiKeys(
+  userId: string,
+  data: {
+    openai?: string;
+    google?: string;
+    deepseek?: string;
+    fal?: string;
+    defaultTextProvider?: string;
+    defaultImageProvider?: string;
+  },
+) {
+  if (data.openai?.trim()) await setSetting(userId, "openai_api_key", data.openai.trim(), true);
+  if (data.google?.trim()) await setSetting(userId, "google_api_key", data.google.trim(), true);
+  if (data.deepseek?.trim()) await setSetting(userId, "deepseek_api_key", data.deepseek.trim(), true);
+  if (data.fal?.trim()) await setSetting(userId, "fal_api_key", data.fal.trim(), true);
+  if (data.defaultTextProvider) await setSetting(userId, "default_text_provider", data.defaultTextProvider, false);
+  if (data.defaultImageProvider) await setSetting(userId, "default_image_provider", data.defaultImageProvider, false);
+  return { ok: true as const };
+}
+
+async function providerKey(userId: string, provider: string): Promise<string | null> {
+  if (provider === "openai") return getSetting(userId, "openai_api_key");
+  if (provider === "gemini") return getSetting(userId, "google_api_key");
+  if (provider === "deepseek") return getSetting(userId, "deepseek_api_key");
+  if (provider === "flux") return getSetting(userId, "fal_api_key");
+  return null;
 }
 
 export async function savePrefs(
@@ -133,7 +220,13 @@ export async function beginFacebookOAuth(userId: string, redirectUri: string) {
 }
 
 export const listPages = listPagesRepo;
-export const listPosts = listPostsRepo;
+export async function listPosts(
+  userId: string,
+  opts: { pageId?: string; status?: string; limit?: number } = {},
+) {
+  const pageId = opts.pageId ? await resolvePageId(userId, opts.pageId) : undefined;
+  return listPostsRepo(userId, { ...opts, pageId });
+}
 
 export async function getPostBundle(userId: string, postId: string) {
   const post = await getPost(userId, postId);
@@ -172,12 +265,97 @@ export async function reschedule(userId: string, data: { postId: string; schedul
   const post = await getPost(userId, data.postId);
   if (!post) throw new Error("Post not found");
   const when = new Date(data.scheduledAt);
+  if (Number.isNaN(when.getTime())) throw new Error("Pick a valid date and time.");
   const windowNote = facebookScheduleWindow(when);
-  const nextStatus = windowNote || post.status === "LocalDraft" ? "LocalScheduled" : post.status;
+  const page = await getPage(userId, post.page_id);
+  const liveGraph =
+    Boolean(page?.facebook_page_id) &&
+    !page?.is_practice &&
+    Boolean(post.facebook_post_id) &&
+    !String(post.facebook_post_id).startsWith("practice_");
+  const token = await getPageToken(userId, post.page_id);
+  const secret = await getSetting(userId, "facebook_app_secret");
+
+  if (liveGraph && token && secret) {
+    if (!windowNote) {
+      try {
+        await graphFetch({
+          path: `/${post.facebook_post_id}`,
+          method: "POST",
+          token,
+          appSecret: secret,
+          form: { scheduled_publish_time: unixSeconds(when) },
+        });
+        await sql`
+          update posts set
+            scheduled_publish_time = ${data.scheduledAt},
+            status = 'FacebookScheduled',
+            error_message = null,
+            updated_at = now()
+          where id = ${data.postId} and user_id = ${userId}
+        `;
+        await recordLog({ userId, postId: data.postId, status: "graph_reschedule", path: `/${post.facebook_post_id}` });
+        return { status: "FacebookScheduled" as const, warning: null as string | null };
+      } catch (e) {
+        const msg = e instanceof GraphRequestError ? e.mapped.message : e instanceof Error ? e.message : String(e);
+        await recordLog({
+          userId,
+          postId: data.postId,
+          status: "graph_reschedule_failed",
+          error: msg,
+          path: `/${post.facebook_post_id}`,
+        });
+        await sql`
+          update posts set scheduled_publish_time = ${data.scheduledAt}, status = 'LocalScheduled', error_message = ${msg}, updated_at = now()
+          where id = ${data.postId} and user_id = ${userId}
+        `;
+        return {
+          status: "LocalScheduled" as const,
+          warning: `${msg} Saved on the local scheduler. Facebook may still have the original slot — cancel from Drafts if you see a duplicate.`,
+        };
+      }
+    }
+    try {
+      await graphFetch({
+        path: `/${post.facebook_post_id}`,
+        method: "DELETE",
+        token,
+        appSecret: secret,
+      });
+    } catch (e) {
+      await recordLog({
+        userId,
+        postId: data.postId,
+        status: "graph_unschedule_failed",
+        error: e instanceof Error ? e.message : String(e),
+      });
+    }
+    await sql`
+      update posts set
+        scheduled_publish_time = ${data.scheduledAt},
+        status = 'LocalScheduled',
+        facebook_post_id = null,
+        updated_at = now()
+      where id = ${data.postId} and user_id = ${userId}
+    `;
+    await recordLog({ userId, postId: data.postId, status: "rescheduled_local", error: windowNote, path: "calendar" });
+    return {
+      status: "LocalScheduled" as const,
+      warning: `${windowNote} Cancelled the Facebook slot and kept it on the local scheduler.`,
+    };
+  }
+
+  const nextStatus = windowNote || post.status === "LocalDraft" || post.status === "FacebookDraft" ? "LocalScheduled" : post.status;
   await sql`
     update posts set scheduled_publish_time = ${data.scheduledAt}, status = ${nextStatus}, updated_at = now()
     where id = ${data.postId} and user_id = ${userId}
   `;
+
+  if (!windowNote && page && !page.is_practice && page.facebook_page_id && token && secret && post.media_type !== "Story") {
+    const result = await attemptGraphPublish(userId, data.postId, "schedule");
+    return { status: result.status, warning: result.warning };
+  }
+
   await recordLog({ userId, postId: data.postId, status: "rescheduled", error: windowNote, path: "calendar" });
   return { status: nextStatus, warning: windowNote };
 }
@@ -207,7 +385,8 @@ export async function cancelPost(userId: string, postId: string) {
 }
 
 export async function comments(userId: string, filter: "needs" | "hidden" | "all", pageId?: string) {
-  return listComments(userId, filter, pageId);
+  const id = await resolvePageId(userId, pageId);
+  return listComments(userId, filter, id);
 }
 
 export async function hideComment(userId: string, data: { commentId: string; hidden: boolean }) {
@@ -231,19 +410,20 @@ export async function hideComment(userId: string, data: { commentId: string; hid
   ) {
     const token = await getPageToken(userId, post.page_id);
     const secret = await getSetting(userId, "facebook_app_secret");
-    if (token && secret) {
-      try {
-        await graphFetch({
-          path: `/${comment.facebook_comment_id}`,
-          method: "POST",
-          token,
-          appSecret: secret,
-          form: { is_hidden: data.hidden },
-        });
-      } catch (e) {
-        if (e instanceof GraphRequestError) throw new Error(e.mapped.message);
-        throw e;
-      }
+    if (!token || !secret) {
+      throw new Error("Reconnect Facebook to hide this comment on Graph. App Secret and a Page token are required.");
+    }
+    try {
+      await graphFetch({
+        path: `/${comment.facebook_comment_id}`,
+        method: "POST",
+        token,
+        appSecret: secret,
+        form: { is_hidden: data.hidden },
+      });
+    } catch (e) {
+      if (e instanceof GraphRequestError) throw new Error(e.mapped.message);
+      throw e;
     }
   }
   await sql`
@@ -269,19 +449,20 @@ export async function sendReply(userId: string, data: { commentId: string; messa
   if (post && comment.facebook_comment_id && !comment.facebook_comment_id.startsWith("practice")) {
     const token = await getPageToken(userId, post.page_id);
     const secret = await getSetting(userId, "facebook_app_secret");
-    if (token && secret) {
-      try {
-        await graphFetch({
-          path: `/${comment.facebook_comment_id}/comments`,
-          method: "POST",
-          token,
-          appSecret: secret,
-          form: { message },
-        });
-      } catch (e) {
-        if (e instanceof GraphRequestError) throw new Error(e.mapped.message);
-        throw e;
-      }
+    if (!token || !secret) {
+      throw new Error("Reconnect Facebook to reply on Graph. App Secret and a Page token are required.");
+    }
+    try {
+      await graphFetch({
+        path: `/${comment.facebook_comment_id}/comments`,
+        method: "POST",
+        token,
+        appSecret: secret,
+        form: { message },
+      });
+    } catch (e) {
+      if (e instanceof GraphRequestError) throw new Error(e.mapped.message);
+      throw e;
     }
   }
   await sql`
@@ -290,6 +471,16 @@ export async function sendReply(userId: string, data: { commentId: string; messa
   `;
   await sql`update comments set needs_reply = false where id = ${data.commentId} and user_id = ${userId}`;
   await recordLog({ userId, postId: comment.post_id, status: "reply_sent", path: "inbox" });
+  return { ok: true as const };
+}
+
+export async function markCommentHandled(userId: string, commentId: string) {
+  const sql = await getSql();
+  const rows = await sql<{ id: string }>`
+    select id from comments where id = ${commentId} and user_id = ${userId}
+  `;
+  if (!rows[0]) throw new Error("Comment not found");
+  await sql`update comments set needs_reply = false where id = ${commentId} and user_id = ${userId}`;
   return { ok: true as const };
 }
 
@@ -353,27 +544,28 @@ export async function search(userId: string, q: string) {
 export async function analytics(userId: string, data: { pageId?: string; days: number }) {
   const sql = await getSql();
   const days = data.days === 7 || data.days === 90 ? data.days : 28;
-  const window = days === 7 ? "7 days" : days === 90 ? "90 days" : "28 days";
-  const raw = data.pageId
+  const since = new Date(Date.now() - days * 86_400_000).toISOString();
+  const pageId = await resolvePageId(userId, data.pageId);
+  const raw = pageId
     ? await sql<AnalyticsPoint>`
         select id, message, published_time, created_at, reactions_count, comments_count,
-               shares_count, media_view_unique, ai_variant_label, variant_group_id
+               shares_count, media_view_unique, ai_variant_label, variant_group_id, media_type, link
         from posts
-        where user_id = ${userId} and page_id = ${data.pageId}
+        where user_id = ${userId} and page_id = ${pageId}
           and status = 'Published'
-          and coalesce(published_time, created_at) > now() - ${window}::interval
+          and coalesce(published_time, created_at) > ${since}
         order by coalesce(published_time, created_at)
       `
     : await sql<AnalyticsPoint>`
         select id, message, published_time, created_at, reactions_count, comments_count,
-               shares_count, media_view_unique, ai_variant_label, variant_group_id
+               shares_count, media_view_unique, ai_variant_label, variant_group_id, media_type, link
         from posts
         where user_id = ${userId}
           and status = 'Published'
-          and coalesce(published_time, created_at) > now() - ${window}::interval
+          and coalesce(published_time, created_at) > ${since}
         order by coalesce(published_time, created_at)
       `;
-  const page = data.pageId ? await getPage(userId, data.pageId) : null;
+  const page = pageId ? await getPage(userId, pageId) : null;
   return {
     rows: raw,
     insightsLocked: page ? page.fan_count < 100 : false,
@@ -384,13 +576,14 @@ export async function analytics(userId: string, data: { pageId?: string; days: n
 
 export async function mediaLibrary(userId: string, pageId?: string): Promise<MediaLibraryItem[]> {
   const sql = await getSql();
-  const rows = pageId
+  const id = await resolvePageId(userId, pageId);
+  const rows = id
     ? await sql<MediaLibraryItem>`
         select ci.id, ci.file_name, ci.media_kind, ci.alt_text, ci.data_url, pa.name as page_name, ci.mime_type
         from content_items ci
         join posts po on po.id = ci.post_id
         join pages pa on pa.id = po.page_id
-        where ci.user_id = ${userId} and po.page_id = ${pageId}
+        where ci.user_id = ${userId} and po.page_id = ${id}
         order by ci.created_at desc
         limit 80
       `
@@ -408,13 +601,19 @@ export async function mediaLibrary(userId: string, pageId?: string): Promise<Med
 
 export async function generateVariants(
   userId: string,
-  data: { pageId: string; brief: string; merchCta?: string | null },
+  data: { pageId: string; brief: string; merchCta?: string | null; provider?: string },
 ) {
   const page = await getPage(userId, data.pageId);
   if (!page) throw new Error("Page not found");
-  if (!aiAvailable()) {
+  const settings = await getSettings(userId);
+  const provider = (data.provider || settings.defaultTextProvider || "grok") as TextProviderId;
+  const canGrok = aiAvailable();
+  const key = await providerKey(userId, provider);
+  const hasProvider = provider === "grok" ? canGrok : Boolean(key);
+  if (!hasProvider) {
     return {
       ai: false as const,
+      provider,
       storytelling: `${data.brief.trim()}\n\nA quiet afternoon in the shop. Come by if you want to talk about it.`,
       cta: `${data.brief.trim()}\n\nDetails on the Page — tap through when you're ready.`,
       question: `${data.brief.trim()}\n\nWhat would you add? Tell us in the comments.`,
@@ -425,22 +624,30 @@ export async function generateVariants(
     brandVoice: page.brand_voice,
     pageName: page.name,
     merchCta: data.merchCta,
+    provider,
+    apiKey: key,
   });
-  return { ai: true as const, ...v };
+  return { ai: true as const, provider, ...v };
 }
 
-export async function hashtags(userId: string, data: { pageId: string; caption: string }) {
+export async function hashtags(userId: string, data: { pageId: string; caption: string; provider?: string }) {
   const page = await getPage(userId, data.pageId);
-  if (!aiAvailable()) {
+  const settings = await getSettings(userId);
+  const provider = (data.provider || settings.defaultTextProvider || "grok") as TextProviderId;
+  const key = await providerKey(userId, provider);
+  const can = provider === "grok" ? aiAvailable() : Boolean(key);
+  if (!can) {
     const words = data.caption.toLowerCase().split(/\W+/).filter((w) => w.length > 4).slice(0, 4);
-    return { tags: words.map((w) => `#${w}`), ai: false as const };
+    return { tags: words.map((w) => `#${w}`), ai: false as const, provider };
   }
   const tags = await suggestHashtags({
     caption: data.caption,
     brandVoice: page?.brand_voice,
     pageName: page?.name ?? "Page",
+    provider,
+    apiKey: key,
   });
-  return { tags, ai: true as const };
+  return { tags, ai: true as const, provider };
 }
 
 export async function analyze(content: string) {
@@ -486,6 +693,11 @@ export async function exportCsv(userId: string, data: { pageId?: string; days: n
 }
 
 export async function tick(userId: string) {
+  try {
+    await refreshVaultTokens(userId);
+  } catch {
+    /* keep ticking */
+  }
   const ran = await tickScheduler(userId);
   const last = await getSetting(userId, "last_graph_sync");
   const stale = !last || Date.now() - new Date(last).getTime() > 120_000;
@@ -512,13 +724,14 @@ export async function syncNow(userId: string): Promise<SyncResult> {
 
 export async function calendar(userId: string, pageId?: string) {
   const sql = await getSql();
-  const rows = pageId
+  const id = await resolvePageId(userId, pageId);
+  const rows = id
     ? await sql<Record<string, string | number | null>>`
         select po.id, po.page_id, pa.name as page_name, po.message, po.status, po.media_type,
                po.scheduled_publish_time, po.published_time, po.created_at,
                po.reactions_count, po.comments_count, po.engagement_score
         from posts po join pages pa on pa.id = po.page_id
-        where po.user_id = ${userId} and po.page_id = ${pageId} and po.status not in ('Cancelled')
+        where po.user_id = ${userId} and po.page_id = ${id} and po.status not in ('Cancelled')
         order by coalesce(po.scheduled_publish_time, po.published_time, po.created_at)
       `
     : await sql<Record<string, string | number | null>>`
@@ -549,10 +762,52 @@ export const ideas = listIdeas;
 export const snippets = listSnippets;
 export const rememberIdea = saveIdea;
 export const forgetIdea = deleteIdea;
+export const moveIdea = updateIdea;
 export const rememberSnippet = saveSnippet;
 export const forgetSnippet = deleteSnippet;
 
-export async function imaginePhoto(prompt: string) {
-  return generateImage(prompt);
+export async function imaginePhoto(userId: string, prompt: string, provider?: string) {
+  const settings = await getSettings(userId);
+  const chosen = (provider || settings.defaultImageProvider || "grok") as ImageProviderId;
+  const key = await providerKey(userId, chosen);
+  return generateImageWithProvider({ provider: chosen, prompt, apiKey: key });
+}
+
+async function needsYouSafe(userId: string): Promise<NeedsItem[]> {
+  try {
+    return await needsYou(userId);
+  } catch {
+    return [];
+  }
+}
+
+export const listNeeds = needsYouSafe;
+export const createPairingCode = mintPairing;
+export const listDevices = listPairedDevices;
+export const revokeDevice = revokePairedDevice;
+export const pairDevice = redeemPairingCode;
+
+export async function runAgent(
+  userId: string,
+  data: { pageId: string; prompt: string; provider?: string },
+) {
+  const { runDeskAgent } = await import("./agent");
+  return runDeskAgent(userId, data);
+}
+
+export async function listAgentRuns(userId: string, pageId?: string) {
+  const sql = await getSql();
+  const rows = pageId
+    ? await sql<{ id: string; prompt: string; summary: string | null; created_at: string }>`
+        select id, prompt, summary, created_at from agent_runs
+        where user_id = ${userId} and page_id = ${pageId}
+        order by created_at desc limit 12
+      `
+    : await sql<{ id: string; prompt: string; summary: string | null; created_at: string }>`
+        select id, prompt, summary, created_at from agent_runs
+        where user_id = ${userId}
+        order by created_at desc limit 12
+      `;
+  return rows;
 }
 

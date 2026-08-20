@@ -13,18 +13,23 @@ import {
   cadenceFn,
   composeFn,
   generateVariantsFn,
+  getSettingsFn,
   hashtagsFn,
   bootstrapApp,
   merchFn,
+  mediaLibraryFn,
   policyFn,
   saveIdeaFn,
   saveSnippetFn,
   snippetsFn,
   imaginePhotoFn,
 } from "@/lib/posterpal/fns";
-import type { CadenceResult, MerchRow, PageRow, PolicyResult, SnippetRow } from "@/lib/posterpal/types";
+import { applyUtm, captionHint, captionStats, countHashtags, hasCallToAction, isQuietHour, suggestedIndustrySlot, trimHashtags } from "@/lib/posterpal/operator";
+import { IMAGE_PROVIDERS, TEXT_PROVIDERS } from "@/lib/posterpal/providers";
+import type { CadenceResult, MediaLibraryItem, MerchRow, PageRow, PolicyResult, SettingsBag, SnippetRow } from "@/lib/posterpal/types";
 import { useShellStore } from "@/lib/store";
 import { validateReel } from "@/lib/posterpal/policy";
+import { copyText } from "@/lib/utils";
 
 export const Route = createFileRoute("/composer")({ component: ComposerPage });
 
@@ -52,6 +57,7 @@ function ComposerPage() {
 
 function useComposerState() {
   const pageId = useShellStore((s) => s.selectedPageId);
+  const setPageId = useShellStore((s) => s.setSelectedPageId);
   const prefill = useShellStore((s) => s.composerPrefill);
   const setPrefill = useShellStore((s) => s.setComposerPrefill);
   const [pages, setPages] = useState<PageRow[]>([]);
@@ -64,24 +70,53 @@ function useComposerState() {
   const [media, setMedia] = useState<MediaFile[]>([]);
   const [merch, setMerch] = useState<MerchRow[]>([]);
   const [snippets, setSnippets] = useState<SnippetRow[]>([]);
+  const [library, setLibrary] = useState<MediaLibraryItem[]>([]);
   const [policy, setPolicy] = useState<PolicyResult | null>(null);
   const [cadence, setCadence] = useState<CadenceResult | null>(null);
   const [busy, setBusy] = useState(false);
   const [variants, setVariants] = useState<{ storytelling: string; cta: string; question: string } | null>(null);
   const [imagePrompt, setImagePrompt] = useState("");
+  const [selectedMerchId, setSelectedMerchId] = useState<string | null>(null);
+  const [shopInFirstComment, setShopInFirstComment] = useState(false);
+  const [textProvider, setTextProvider] = useState("grok");
+  const [imageProvider, setImageProvider] = useState("grok");
+  const [variantLabel, setVariantLabel] = useState<string | null>(null);
+  const [variantGroupId, setVariantGroupId] = useState<string | null>(null);
+  const [settings, setSettings] = useState<SettingsBag | null>(null);
 
   useEffect(() => {
     void bootstrapApp().then((snap) => setPages(snap.pages));
+    void getSettingsFn().then((s) => {
+      setSettings(s);
+      setTextProvider(s.defaultTextProvider);
+      setImageProvider(s.defaultImageProvider);
+    });
   }, []);
 
   useEffect(() => {
     if (!prefill) return;
     setMessage(prefill.message);
+    if (prefill.pageId) setPageId(prefill.pageId);
     if (prefill.mediaType === "Photo" || prefill.mediaType === "Carousel" || prefill.mediaType === "Video" || prefill.mediaType === "Reel" || prefill.mediaType === "Story" || prefill.mediaType === "Text") {
       setMediaType(prefill.mediaType);
     }
+    if (prefill.media?.length) {
+      setMedia(
+        prefill.media.map((m) => ({
+          fileName: m.fileName,
+          mimeType: m.mimeType,
+          dataUrl: m.dataUrl,
+          altText: m.altText,
+          createdWithAi: m.createdWithAi,
+        })),
+      );
+    }
+    if (prefill.when) {
+      setWhen(prefill.when);
+      setMode("schedule");
+    }
     setPrefill(null);
-  }, [prefill, setPrefill]);
+  }, [prefill, setPrefill, setPageId]);
 
   const selected = pages.find((p) => p.id === pageId) ?? pages[0];
 
@@ -90,6 +125,9 @@ function useComposerState() {
     void merchFn({ data: { pageId: selected.id } }).then(setMerch);
     void cadenceFn({ data: { pageId: selected.id } }).then(setCadence);
     void snippetsFn({ data: { pageId: selected.id } }).then(setSnippets);
+    void mediaLibraryFn({ data: { pageId: selected.id } })
+      .then(setLibrary)
+      .catch(() => setLibrary([]));
   }, [selected?.id]);
 
   useEffect(() => {
@@ -100,7 +138,7 @@ function useComposerState() {
           pageId: selected.id,
           message,
           link: link || null,
-          merchUrl: merch[0]?.url ?? null,
+          merchUrl: (merch.find((m) => m.id === selectedMerchId) ?? merch[0])?.url ?? null,
           hasImages: media.length > 0,
           missingAlt: media.some((m) => !m.altText.trim()),
           createdWithAi: media.some((m) => m.createdWithAi),
@@ -108,11 +146,12 @@ function useComposerState() {
       }).then(setPolicy);
     }, 250);
     return () => window.clearTimeout(t);
-  }, [message, link, media, merch, selected?.id]);
+  }, [message, link, media, merch, selected?.id, selectedMerchId]);
 
   return {
     pages,
     selected,
+    setPageId,
     message,
     setMessage,
     link,
@@ -130,6 +169,7 @@ function useComposerState() {
     merch,
     snippets,
     setSnippets,
+    library,
     policy,
     cadence,
     busy,
@@ -138,23 +178,41 @@ function useComposerState() {
     setVariants,
     imagePrompt,
     setImagePrompt,
+    selectedMerchId,
+    setSelectedMerchId,
+    shopInFirstComment,
+    setShopInFirstComment,
+    textProvider,
+    setTextProvider,
+    imageProvider,
+    setImageProvider,
+    variantLabel,
+    setVariantLabel,
+    variantGroupId,
+    setVariantGroupId,
+    settings,
   };
 }
 
 function Composer() {
   const s = useComposerState();
+  const stats = captionStats(s.message);
+  const tags = countHashtags(s.message);
+  const reuse = s.library.filter((r) => typeof r.data_url === "string" && r.data_url).slice(0, 6);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
         e.preventDefault();
-        void submit(s, s.mode === "local-draft" ? "now" : s.mode);
+        void submit(s, s.mode);
       }
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "s") {
         e.preventDefault();
         void submit(s, "local-draft");
       }
       if (e.key === "Escape") {
+        const el = e.target as HTMLElement | null;
+        if (el && (el.tagName === "TEXTAREA" || el.tagName === "INPUT" || el.isContentEditable)) return;
         s.setMessage("");
         s.setMedia([]);
       }
@@ -178,6 +236,23 @@ function Composer() {
         title="Composer"
         hint={`${s.selected.name}${s.selected.is_read_only ? " · analyze-only" : ""}. Ctrl+Enter sends the selected mode. Ctrl+S saves a local draft. Esc clears. Publish now hits Graph immediately. Schedule uses Facebook if the time is 10 minutes–30 days out; otherwise the local scheduler keeps it. Local draft never leaves this machine. Facebook draft is unpublished (published=false, no time) per the Pages API.`}
       />
+      {s.pages.length > 1 ? (
+        <label className="flex flex-wrap items-center gap-2 text-[13px]">
+          <span className="text-muted-foreground">Posting as</span>
+          <select
+            value={s.selected.id}
+            onChange={(e) => s.setPageId(e.target.value)}
+            className="rounded-md border border-input bg-background px-2 py-1.5 text-sm"
+          >
+            {s.pages.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}
+                {p.is_practice ? " (practice)" : ""}
+              </option>
+            ))}
+          </select>
+        </label>
+      ) : null}
 
       {s.cadence?.level !== "ok" && s.cadence ? (
         <div
@@ -225,6 +300,15 @@ function Composer() {
             placeholder="Write the caption…"
             className="min-h-40 text-[15px]"
           />
+          <div className="flex flex-wrap items-center justify-between gap-2 text-[12px] text-muted-foreground">
+            <span className="tabular-nums">
+              {stats.chars} chars · {stats.words} words · {tags} #
+            </span>
+            <span>{captionHint(stats.level)}</span>
+          </div>
+          {s.message.trim() && !hasCallToAction(s.message) ? (
+            <p className="text-[12px] text-muted-foreground">No question or CTA yet. Optional.</p>
+          ) : null}
           <div className="grid gap-3 sm:grid-cols-2">
             <div className="space-y-1.5">
               <Label>Link</Label>
@@ -236,21 +320,41 @@ function Composer() {
             </div>
           </div>
           {s.merch.length > 0 ? (
-            <div className="flex flex-wrap gap-2">
-              {s.merch.map((m) => (
-                <Button
-                  key={m.id}
-                  size="sm"
-                  variant="outline"
-                  onClick={() => {
-                    s.setLink(applyUtm(m.url, m.utm_template));
-                    if (m.cta_override) s.setMessage((prev) => (prev ? `${prev}\n\n${m.cta_override}` : m.cta_override!));
-                    toast.message("Merch CTA inserted. Add a branded-content disclosure if this is commercial.");
+            <div className="space-y-2">
+              <Label>Product for this post</Label>
+              <div className="flex flex-wrap gap-2">
+                {s.merch.map((m) => (
+                  <Button
+                    key={m.id}
+                    size="sm"
+                    variant={s.selectedMerchId === m.id ? "default" : "outline"}
+                    onClick={() => {
+                      s.setSelectedMerchId(m.id);
+                      s.setLink(applyUtm(m.url, m.utm_template));
+                      if (m.cta_override) s.setMessage((prev) => (prev ? `${prev}\n\n${m.cta_override}` : m.cta_override!));
+                      if (s.shopInFirstComment) {
+                        s.setFirstComment(applyUtm(m.url, m.utm_template, "first-comment"));
+                      }
+                      toast.message("Merch CTA inserted. Add a branded-content disclosure if this is commercial.");
+                    }}
+                  >
+                    {m.title}
+                  </Button>
+                ))}
+              </div>
+              <label className="flex items-center gap-2 text-[13px]">
+                <input
+                  type="checkbox"
+                  checked={s.shopInFirstComment}
+                  onChange={(e) => {
+                    const on = e.target.checked;
+                    s.setShopInFirstComment(on);
+                    const m = s.merch.find((x) => x.id === s.selectedMerchId) ?? s.merch[0];
+                    if (on && m) s.setFirstComment(applyUtm(m.url, m.utm_template, "first-comment"));
                   }}
-                >
-                  Insert {m.title}
-                </Button>
-              ))}
+                />
+                Drop the shop URL in the first comment (keeps the caption clean; Graph posts it after a live publish)
+              </label>
             </div>
           ) : null}
 
@@ -266,6 +370,38 @@ function Composer() {
             </div>
           ) : null}
 
+          {s.mediaType !== "Text" && reuse.length > 0 ? (
+            <div className="flex flex-wrap gap-2">
+              {reuse.map((r) => (
+                <button
+                  key={String(r.id)}
+                  type="button"
+                  className="overflow-hidden rounded-md border border-border"
+                  title={`Reuse ${String(r.file_name)}`}
+                  onClick={() => {
+                    s.setMedia([
+                      ...s.media,
+                      {
+                        fileName: String(r.file_name),
+                        mimeType: String(r.mime_type ?? "image/jpeg"),
+                        dataUrl: String(r.data_url),
+                        altText: String(r.alt_text ?? ""),
+                        createdWithAi: false,
+                      },
+                    ]);
+                    toast.message("Attached from the library. Review alt text.");
+                  }}
+                >
+                  {String(r.data_url).startsWith("data:image") || String(r.data_url).startsWith("http") ? (
+                    <img src={String(r.data_url)} alt="" className="size-12 object-cover" />
+                  ) : (
+                    <span className="grid size-12 place-items-center text-[10px]">file</span>
+                  )}
+                </button>
+              ))}
+            </div>
+          ) : null}
+
           {s.mediaType !== "Text" ? (
             <MediaDrop
               media={s.media}
@@ -273,6 +409,7 @@ function Composer() {
               mediaType={s.mediaType}
               imagePrompt={s.imagePrompt}
               setImagePrompt={s.setImagePrompt}
+              imageProvider={s.imageProvider}
               caption={s.message}
               busy={s.busy}
               setBusy={s.setBusy}
@@ -289,20 +426,37 @@ function Composer() {
               ] as const
             ).map(([m, label, hint]) => (
               <Hint key={m} label={hint}>
-                <Button size="sm" variant={s.mode === m ? "default" : "secondary"} onClick={() => s.setMode(m)}>
+                <Button
+                  size="sm"
+                  variant={s.mode === m ? "default" : "secondary"}
+                  onClick={() => {
+                    s.setMode(m);
+                    if (m === "schedule" && !s.when) s.setWhen(suggestedIndustrySlot());
+                  }}
+                >
                   {label}
                 </Button>
               </Hint>
             ))}
             {s.mode === "schedule" ? (
-              <Hint label="Must be 10 minutes to 30 days from now for Facebook. Sooner or later stays on the local scheduler.">
-                <Input
-                  type="datetime-local"
-                  className="w-auto"
-                  value={s.when}
-                  onChange={(e) => s.setWhen(e.target.value)}
-                />
-              </Hint>
+              <div className="flex flex-wrap items-center gap-2">
+                <Hint label="Must be 10 minutes to 30 days from now for Facebook. Sooner or later stays on the local scheduler.">
+                  <Input
+                    type="datetime-local"
+                    className="w-auto"
+                    value={s.when}
+                    onChange={(e) => s.setWhen(e.target.value)}
+                  />
+                </Hint>
+                <Hint label="Fills the next midweek 1pm local slot — Sprout's 2026 Facebook peak (Tue/Wed 12–8pm). Replace with this Page's own best hour from Analytics once you have history.">
+                  <Button size="sm" variant="outline" type="button" onClick={() => s.setWhen(suggestedIndustrySlot())}>
+                    Suggested hour
+                  </Button>
+                </Hint>
+              </div>
+            ) : null}
+            {s.mode === "schedule" && s.when && isQuietHour(s.when) ? (
+              <p className="w-full text-[12px] text-warning">Quiet hours (11pm–6am). Reach is usually thinner then.</p>
             ) : null}
           </div>
 
@@ -345,18 +499,38 @@ function Composer() {
                 Remember caption
               </Button>
             </Hint>
-            <Hint label="Grok writes three variants (story, CTA, question). You pick one. Nothing is posted.">
+            <Hint label="Copy the caption without posting.">
+              <Button
+                variant="outline"
+                disabled={!s.message.trim()}
+                onClick={() => {
+                  void copyText(s.message).then((ok) =>
+                    toast[ok ? "success" : "error"](ok ? "Caption copied." : "Could not copy."),
+                  );
+                }}
+              >
+                Copy
+              </Button>
+            </Hint>
+            <Hint label="Writes three variants (story, CTA, question) with the selected caption model. You pick one. Nothing is posted.">
               <Button
                 variant="outline"
                 disabled={s.busy || !s.message.trim()}
                 onClick={() => {
                   s.setBusy(true);
+                  const merch = s.merch.find((m) => m.id === s.selectedMerchId) ?? s.merch[0];
                   void generateVariantsFn({
-                    data: { pageId: s.selected!.id, brief: s.message, merchCta: s.merch[0]?.cta_override },
+                    data: {
+                      pageId: s.selected!.id,
+                      brief: s.message,
+                      merchCta: merch?.cta_override,
+                      provider: s.textProvider,
+                    },
                   })
                     .then((v) => {
                       s.setVariants(v);
-                      if (!v.ai) toast.message("AI key not available — showing local variants.");
+                      if (!s.variantGroupId) s.setVariantGroupId(crypto.randomUUID());
+                      if (!v.ai) toast.message("No key for that model — showing local variants. Add a key in Settings.");
                     })
                     .catch((e: unknown) => toast.error(e instanceof Error ? e.message : "Variant failed"))
                     .finally(() => s.setBusy(false));
@@ -370,7 +544,7 @@ function Composer() {
                 variant="outline"
                 disabled={s.busy || !s.message.trim()}
                 onClick={() => {
-                  void hashtagsFn({ data: { pageId: s.selected!.id, caption: s.message } })
+                  void hashtagsFn({ data: { pageId: s.selected!.id, caption: s.message, provider: s.textProvider } })
                     .then((r) => {
                       s.setMessage((m) => `${m.trim()} ${r.tags.join(" ")}`.trim());
                     })
@@ -380,6 +554,46 @@ function Composer() {
                 Hashtags
               </Button>
             </Hint>
+            {tags > 3 ? (
+              <Hint label="Keeps the first 3 hashtags. Policy default.">
+                <Button variant="outline" onClick={() => s.setMessage(trimHashtags(s.message, 3))}>
+                  Trim extra #
+                </Button>
+              </Hint>
+            ) : null}
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="space-y-1">
+              <Label>Caption model</Label>
+              <select
+                className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
+                value={s.textProvider}
+                onChange={(e) => s.setTextProvider(e.target.value)}
+              >
+                {TEXT_PROVIDERS.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.label}
+                    {s.settings?.providers[p.id as keyof NonNullable<typeof s.settings>["providers"]] ? "" : p.needsKey ? " — add key" : ""}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="space-y-1">
+              <Label>Image model</Label>
+              <select
+                className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
+                value={s.imageProvider}
+                onChange={(e) => s.setImageProvider(e.target.value)}
+              >
+                {IMAGE_PROVIDERS.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.label}
+                    {s.settings?.providers[p.id as keyof NonNullable<typeof s.settings>["providers"]] ? "" : p.needsKey ? " — add key" : ""}
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
 
           {s.variants ? (
@@ -395,7 +609,11 @@ function Composer() {
                   key={label}
                   type="button"
                   className="rounded-lg border border-border p-3 text-left text-sm hover:bg-muted"
-                  onClick={() => s.setMessage(text)}
+                  onClick={() => {
+                    s.setMessage(text);
+                    s.setVariantLabel(label);
+                    if (!s.variantGroupId) s.setVariantGroupId(crypto.randomUUID());
+                  }}
                 >
                   <div className="text-[11px] font-semibold text-muted-foreground">{label}</div>
                   {text}
@@ -461,18 +679,22 @@ async function submit(s: ReturnType<typeof useComposerState>, mode: Mode) {
   s.setBusy(true);
   try {
     const scheduledAt = s.when ? new Date(s.when).toISOString() : null;
+    const merch = s.merch.find((m) => m.id === s.selectedMerchId) ?? s.merch[0];
     const result = await composeFn({
       data: {
         pageId: s.selected.id,
         message: s.message,
         link: s.link || null,
-        firstComment: s.firstComment || null,
+        firstComment:
+          s.firstComment ||
+          (s.shopInFirstComment && merch ? applyUtm(merch.url, merch.utm_template, "first-comment") : null),
         mediaType: s.mediaType,
         mode,
         scheduledAt,
-        merchUrl: s.merch[0]?.url ?? null,
+        merchUrl: merch?.url ?? null,
         media: s.media,
-        variantLabel: undefined,
+        variantLabel: s.variantLabel,
+        variantGroupId: s.variantGroupId,
       },
     });
     toast.success(`${result.status}${result.warning ? " — " + result.warning : ""}`);
@@ -487,22 +709,13 @@ async function submit(s: ReturnType<typeof useComposerState>, mode: Mode) {
   }
 }
 
-function applyUtm(url: string, template?: string | null) {
-  if (!template) return url;
-  const u = new URL(url, "https://example.invalid");
-  for (const part of template.split("&")) {
-    const [k, v] = part.split("=");
-    if (k) u.searchParams.set(k, (v ?? "").replace("{slug}", "post"));
-  }
-  return u.toString();
-}
-
 function MediaDrop({
   media,
   setMedia,
   mediaType,
   imagePrompt,
   setImagePrompt,
+  imageProvider,
   caption,
   busy,
   setBusy,
@@ -512,6 +725,7 @@ function MediaDrop({
   mediaType: MediaKind;
   imagePrompt: string;
   setImagePrompt: (v: string) => void;
+  imageProvider: string;
   caption: string;
   busy: boolean;
   setBusy: (v: boolean) => void;
@@ -539,12 +753,12 @@ function MediaDrop({
         />
       </Label>
       <p className="mt-1 text-[12px] text-muted-foreground">
-        Local files upload to Graph as multipart (photos/videos) or rupload (Reels/Stories). Public https URLs also work. Reels: 9:16, 3–60s, min 540×960. Max 12MB per file.
+        Local files upload to Graph as multipart (photos/videos) or rupload (Reels/Stories). Public https URLs also work. Reels: 9:16, 3–60s, min 540×960. Max 6MB per file in Composer (bigger files: paste a public https URL as the Link).
       </p>
       {mediaType === "Photo" || mediaType === "Carousel" ? (
         <div className="mt-3 flex flex-wrap items-end gap-2">
           <div className="min-w-[200px] flex-1 space-y-1">
-            <Label htmlFor="imagine-prompt">Generate with Grok Imagine</Label>
+            <Label htmlFor="imagine-prompt">Generate a still</Label>
             <Input
               id="imagine-prompt"
               value={imagePrompt}
@@ -552,7 +766,7 @@ function MediaDrop({
               placeholder={caption.slice(0, 80) || "A quiet bookstore window at dusk, no text"}
             />
           </div>
-          <Hint label="Creates one still image with grok-imagine-image. Marked as AI media. You still click Send to post.">
+          <Hint label="Creates one still with the selected image model. Marked as AI media. You still click Send to post.">
             <Button
               type="button"
               size="sm"
@@ -565,7 +779,7 @@ function MediaDrop({
                   return;
                 }
                 setBusy(true);
-                void imaginePhotoFn({ data: { prompt } })
+                void imaginePhotoFn({ data: { prompt, provider: imageProvider } })
                   .then((r) => {
                     if ("error" in r) {
                       toast.error(r.error);
@@ -631,8 +845,8 @@ async function ingestFiles(
 ) {
   const next = [...current];
   for (const file of files) {
-    if (file.size > 12_000_000) {
-      toast.error(`${file.name} is over 12MB. Compress it, or paste a public https URL as the Link for Graph to fetch.`);
+    if (file.size > 6_000_000) {
+      toast.error(`${file.name} is over 6MB. Compress it, or paste a public https URL as the Link for Graph to fetch.`);
       continue;
     }
     const dataUrl = await readDataUrl(file);

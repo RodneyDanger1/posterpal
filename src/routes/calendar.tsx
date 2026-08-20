@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { addDays, addMonths, endOfMonth, endOfWeek, format, isSameDay, startOfMonth, startOfWeek } from "date-fns";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
@@ -11,8 +11,9 @@ import { Input } from "@/components/ui/input";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Hint } from "@/components/ui/tooltip";
 import { calendarFn, rescheduleFn } from "@/lib/posterpal/fns";
+import { nextEmptyDay, toLocalInput } from "@/lib/posterpal/operator";
 import { useShellStore } from "@/lib/store";
-import { cn } from "@/lib/utils";
+import { cn, copyText } from "@/lib/utils";
 
 export const Route = createFileRoute("/calendar")({ component: () => <Guard><CalendarView /></Guard> });
 
@@ -35,13 +36,10 @@ function whenOf(p: CalPost) {
   return new Date(p.scheduled_publish_time ?? p.published_time ?? p.created_at);
 }
 
-function toLocalInput(d: Date) {
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
-
 function CalendarView() {
   const pageId = useShellStore((s) => s.selectedPageId) ?? undefined;
+  const setPrefill = useShellStore((s) => s.setComposerPrefill);
+  const navigate = useNavigate();
   const [posts, setPosts] = useState<CalPost[]>([]);
   const [cursor, setCursor] = useState(new Date());
   const [mode, setMode] = useState<"month" | "week" | "heat">("month");
@@ -76,6 +74,14 @@ function CalendarView() {
     }
     return map;
   }, [posts]);
+
+  const composeOn = (day: Date) => {
+    const slot = new Date(day);
+    slot.setHours(10, 0, 0, 0);
+    if (slot.getTime() < Date.now() + 15 * 60 * 1000) slot.setTime(Date.now() + 15 * 60 * 1000);
+    setPrefill({ message: "", pageId, when: toLocalInput(slot) });
+    void navigate({ to: "/composer" });
+  };
 
   const dropOn = (day: Date) => {
     if (!dragId) return;
@@ -118,6 +124,19 @@ function CalendarView() {
         <Hint label="Next month or week">
           <Button variant="outline" size="sm" onClick={() => shift(1)}>Next</Button>
         </Hint>
+        <Hint label="First day with no scheduled or published post">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              const d = nextEmptyDay(posts.map((p) => whenOf(p).toISOString()));
+              setCursor(d);
+              toast.message(`Next empty day is ${format(d, "EEE MMM d")}.`);
+            }}
+          >
+            Next empty day
+          </Button>
+        </Hint>
         <Tabs value={mode} onValueChange={(v) => setMode(v as typeof mode)}>
           <TabsList>
             <TabsTrigger value="month" title="Full month grid">Month</TabsTrigger>
@@ -146,12 +165,14 @@ function CalendarView() {
           <div className="grid grid-cols-7">
             {days.map((day) => {
               const items = posts.filter((p) => isSameDay(whenOf(p), day));
-              const heatVal = heat.get(format(day, "yyyy-MM-dd"));
               return (
                 <div
                   key={day.toISOString()}
                   onDragOver={(e) => e.preventDefault()}
                   onDrop={() => dropOn(day)}
+                  onDoubleClick={() => {
+                    if (items.length === 0) composeOn(day);
+                  }}
                   className={cn(
                     "min-h-28 border-b border-r border-border p-1.5",
                     day.getMonth() !== cursor.getMonth() && mode === "month" ? "bg-muted/40" : "",
@@ -160,7 +181,30 @@ function CalendarView() {
                 >
                   <div className="flex items-center justify-between text-[12px] tabular-nums">
                     <span>{format(day, "d")}</span>
-                    {heatVal ? <span className="text-muted-foreground">{heatVal.count}</span> : null}
+                    {items.length > 0 ? (
+                      <button
+                        type="button"
+                        className="text-[11px] text-muted-foreground underline"
+                        onClick={() => {
+                          const body = items
+                            .map((p) => `${format(whenOf(p), "h:mm a")} · ${p.page_name} · ${p.message ?? "(no caption)"}`)
+                            .join("\n");
+                          void copyText(`${format(day, "EEE MMM d")}\n${body}`).then((ok) =>
+                            toast[ok ? "success" : "error"](ok ? "Day copied." : "Could not copy."),
+                          );
+                        }}
+                      >
+                        copy
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        className="text-[11px] text-muted-foreground underline"
+                        onClick={() => composeOn(day)}
+                      >
+                        +
+                      </button>
+                    )}
                   </div>
                   <div className="mt-1 space-y-1">
                     {items.map((p) => (

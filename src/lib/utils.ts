@@ -42,3 +42,30 @@ export function pageHue(id: string): string {
   for (let i = 0; i < id.length; i += 1) h = (h + id.charCodeAt(i) * 17) % 360;
   return `hsl(${h} 42% 46%)`;
 }
+
+/** Clipboard that survives the live-preview iframe (third-party cookies block navigator.clipboard). */
+export async function copyText(text: string): Promise<boolean> {
+  try {
+    if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch {
+    /* fall through */
+  }
+  try {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.setAttribute("readonly", "");
+    ta.style.position = "fixed";
+    ta.style.left = "-9999px";
+    document.body.appendChild(ta);
+    ta.select();
+    const ok = document.execCommand("copy");
+    ta.remove();
+    return ok;
+  } catch {
+    return false;
+  }
+}
+

@@ -5,17 +5,16 @@ import {
 } from "@/lib/posterpal/facebook-names";
 
 export function FacebookNameHelp() {
-  const [name, setName] = useState("PageDesk");
+  const [name, setName] = useState("PosterPal");
   const issues = useMemo(() => facebookAppNameIssues(name), [name]);
   const ok = issues.length === 0;
 
   return (
     <div className="mt-4 rounded-lg border border-border bg-muted/40 p-3">
-      <p className="text-[13px] font-semibold">Facebook App display name (not this product)</p>
+      <p className="text-[13px] font-semibold">Facebook App display name</p>
       <p className="mt-1 text-[13px] text-muted-foreground">
-        PosterPal is the name of <em>this desk</em>. The app you create at developers.facebook.com
-        cannot use Book, Face, FB, Facebook, Meta, Instagram, or WhatsApp — Meta treats those as
-        brand references and rejects them in Basic Settings.
+        Use <strong>PosterPal</strong> on developers.facebook.com. Meta rejects Book, Face, FB,
+        Facebook, Meta, Instagram, and WhatsApp. That is why this desk is no longer called BookBoss.
       </p>
       <label className="mt-3 block text-[12px] font-medium" htmlFor="fb-app-name-check">
         Check a name before you type it into the Facebook dashboard

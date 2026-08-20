@@ -7,20 +7,23 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import {
+  createPairingFn,
   getSettingsFn,
+  listDevicesFn,
   listPagesFn,
+  revokeDeviceFn,
+  saveAiKeysFn,
   saveFacebookApp,
   savePrefs,
   startPractice,
   syncNowFn,
   updatePageVoiceFn,
 } from "@/lib/posterpal/fns";
-import { connectFacebookPopup, facebookCallbackUri } from "@/lib/posterpal/connect-client";
-import { REQUIRED_SCOPES } from "@/lib/posterpal/constants";
-import type { PageRow, SettingsBag } from "@/lib/posterpal/types";
+import type { DeviceRow, PageRow, SettingsBag } from "@/lib/posterpal/types";
 import { FacebookNameHelp } from "@/components/facebook-name-help";
 import { PageHeader } from "@/components/page-header";
 import { useShellStore } from "@/lib/store";
+import { copyText } from "@/lib/utils";
 
 export const Route = createFileRoute("/settings")({ component: () => <Guard><Settings /></Guard> });
 
@@ -35,7 +38,14 @@ function Settings() {
   const [block, setBlock] = useState(20);
   const [voice, setVoice] = useState("");
   const [busy, setBusy] = useState(false);
+  const [redirect, setRedirect] = useState("/api/facebook/callback");
   const pageId = useShellStore((s) => s.selectedPageId);
+  const [openai, setOpenai] = useState("");
+  const [google, setGoogle] = useState("");
+  const [deepseek, setDeepseek] = useState("");
+  const [fal, setFal] = useState("");
+  const [textProvider, setTextProvider] = useState("grok");
+  const [imageProvider, setImageProvider] = useState("grok");
 
   useEffect(() => {
     void getSettingsFn().then((s) => {
@@ -43,8 +53,11 @@ function Settings() {
       setAppId(s.facebookAppId);
       setWarn(s.cadenceWarn);
       setBlock(s.cadenceBlock);
+      setTextProvider(s.defaultTextProvider);
+      setImageProvider(s.defaultImageProvider);
     });
     void listPagesFn().then(setPages);
+    setRedirect(facebookCallbackUri());
   }, []);
 
   useEffect(() => {
@@ -52,13 +65,13 @@ function Settings() {
     setVoice(p?.brand_voice ?? "");
   }, [pages, pageId]);
 
-  const redirect = typeof window !== "undefined" ? facebookCallbackUri() : (settings?.oauthRedirectUri ?? "");
+  const page = pages.find((x) => x.id === pageId) ?? pages[0];
 
   return (
     <div className="mx-auto max-w-2xl space-y-4">
       <PageHeader
         title="Settings"
-        hint="Personal desk — no Google or X login. Facebook is optional and only needed to publish to real Pages. The Facebook App display name cannot be PosterPal."
+        hint="Personal desk — no Google or X login. Facebook is optional. Register the Facebook App as PosterPal (Book is not allowed)."
       />
 
       <section className="rounded-xl bg-card p-4 shadow-card">
@@ -76,6 +89,8 @@ function Settings() {
         </label>
       </section>
 
+      <DevicesPanel />
+
       <section className="rounded-xl bg-card p-4 shadow-card">
         <h2 className="font-semibold">Facebook app</h2>
         <p className="mt-1 text-[13px] text-muted-foreground">
@@ -91,7 +106,18 @@ function Settings() {
             <Input type="password" value={appSecret} onChange={(e) => setAppSecret(e.target.value)} placeholder="Leave blank to keep existing" />
           </div>
           <p className="text-[12px] text-muted-foreground">
-            Valid OAuth Redirect URI: <code className="rounded bg-muted px-1">{redirect}</code>
+            Valid OAuth Redirect URI: <code className="rounded bg-muted px-1">{redirect}</code>{" "}
+            <button
+              type="button"
+              className="underline"
+              onClick={() => {
+                void copyText(redirect).then((ok) =>
+                  toast[ok ? "success" : "error"](ok ? "Redirect URI copied." : "Could not copy."),
+                );
+              }}
+            >
+              Copy
+            </button>
             <br />
             Desktop loopback: <code className="rounded bg-muted px-1">http://127.0.0.1:55443/callback/</code>
             <br />
@@ -183,11 +209,103 @@ function Settings() {
       </section>
 
       <section className="rounded-xl bg-card p-4 shadow-card">
+        <h2 className="font-semibold">AI models (bring your own keys)</h2>
+        <p className="mt-1 text-[13px] text-muted-foreground">
+          Keys are encrypted at rest, same as the Facebook App Secret. Grok stays the default when the platform xAI key is present.
+          DeepSeek is captions only — it has no image model. Flux Schnell (fal) is images only. Nothing auto-posts.
+        </p>
+        <div className="mt-3 grid gap-3 sm:grid-cols-2">
+          <div className="space-y-1">
+            <Label>OpenAI key {settings?.providers.openai ? "(saved)" : ""}</Label>
+            <Input type="password" value={openai} onChange={(e) => setOpenai(e.target.value)} placeholder="sk-…" autoComplete="off" />
+          </div>
+          <div className="space-y-1">
+            <Label>Google Gemini key {settings?.providers.gemini ? "(saved)" : ""}</Label>
+            <Input type="password" value={google} onChange={(e) => setGoogle(e.target.value)} placeholder="AI Studio key" autoComplete="off" />
+          </div>
+          <div className="space-y-1">
+            <Label>DeepSeek key {settings?.providers.deepseek ? "(saved)" : ""}</Label>
+            <Input type="password" value={deepseek} onChange={(e) => setDeepseek(e.target.value)} placeholder="sk-…" autoComplete="off" />
+          </div>
+          <div className="space-y-1">
+            <Label>fal.ai key (Flux) {settings?.providers.flux ? "(saved)" : ""}</Label>
+            <Input type="password" value={fal} onChange={(e) => setFal(e.target.value)} placeholder="fal key" autoComplete="off" />
+          </div>
+        </div>
+        <div className="mt-3 grid gap-3 sm:grid-cols-2">
+          <div className="space-y-1">
+            <Label>Caption model</Label>
+            <select
+              className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
+              value={textProvider}
+              onChange={(e) => setTextProvider(e.target.value)}
+            >
+              {TEXT_PROVIDERS.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.label}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="space-y-1">
+            <Label>Image model</Label>
+            <select
+              className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
+              value={imageProvider}
+              onChange={(e) => setImageProvider(e.target.value)}
+            >
+              {IMAGE_PROVIDERS.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.label}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+        <ul className="mt-3 space-y-1 text-[12px] text-muted-foreground">
+          {TEXT_PROVIDERS.map((p) => (
+            <li key={p.id}>
+              <span className="font-medium text-foreground">{p.label}:</span> {p.hint}
+            </li>
+          ))}
+          {IMAGE_PROVIDERS.filter((p) => p.id === "flux").map((p) => (
+            <li key={p.id}>
+              <span className="font-medium text-foreground">{p.label}:</span> {p.hint}
+            </li>
+          ))}
+        </ul>
+        <Button
+          className="mt-3"
+          onClick={() => {
+            void saveAiKeysFn({
+              data: {
+                openai,
+                google,
+                deepseek,
+                fal,
+                defaultTextProvider: textProvider,
+                defaultImageProvider: imageProvider,
+              },
+            }).then(() => {
+              toast.success("AI keys saved encrypted");
+              setOpenai("");
+              setGoogle("");
+              setDeepseek("");
+              setFal("");
+              void getSettingsFn().then(setSettings);
+            });
+          }}
+        >
+          Save AI keys
+        </Button>
+      </section>
+
+      <section className="rounded-xl bg-card p-4 shadow-card">
         <h2 className="font-semibold">AI</h2>
         <p className="mt-1 text-[13px] text-muted-foreground">
           {settings?.hasAiKey
-            ? "Grok is available for captions, hashtags, sentiment, and reply drafts. Nothing auto-sends."
-            : "AI buttons stay visible. Captions fall back to local variants until an xAI key is present in the environment."}
+            ? "Grok is available for captions, hashtags, sentiment, and reply drafts. Paste other keys above to switch models in Composer. Nothing auto-sends."
+            : "Grok is unavailable in this environment. Add an OpenAI, Gemini, or DeepSeek key above for captions — or Flux/Gemini/OpenAI for stills."}
         </p>
       </section>
 

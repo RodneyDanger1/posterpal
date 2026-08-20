@@ -1,38 +1,52 @@
-import { beginFacebookOAuth } from "./fns";
-
+/** Same-origin bounce so the popup is first-party (Facebook cookies work there). */
 export function facebookCallbackUri(): string {
   if (typeof window === "undefined") return "/api/facebook/callback";
   return `${window.location.origin}/api/facebook/callback`;
 }
 
-/** Open the official Facebook OAuth dialog and resolve when the popup reports back. */
+function facebookStartUri(): string {
+  if (typeof window === "undefined") return "/api/facebook/start";
+  return `${window.location.origin}/api/facebook/start`;
+}
+
+/**
+ * Open the official Facebook OAuth dialog in a TOP-LEVEL popup.
+ *
+ * Must run on the click (no await first) — waiting on a server function drops
+ * the user-gesture, the popup is blocked, and a location= fallback would
+ * navigate the live-preview iframe to Facebook's cookie wall.
+ */
 export function connectFacebookPopup(): Promise<string> {
-  const redirectUri = facebookCallbackUri();
-  return beginFacebookOAuth({ data: { redirectUri } }).then(({ url }) => {
-    return new Promise<string>((resolve, reject) => {
-      const popup = window.open(url, "posterpal-fb", "popup,width=520,height=720");
-      if (!popup) {
-        window.location.href = url;
-        reject(new Error("Popup blocked — allow pop-ups, or continue in this tab."));
-        return;
-      }
-      const timer = window.setInterval(() => {
-        if (popup.closed) {
-          window.clearInterval(timer);
-          window.removeEventListener("message", onMsg);
-          reject(new Error("Facebook window closed before finishing."));
-        }
+  const startUrl = facebookStartUri();
+  const popup = window.open(startUrl, "posterpal-fb", "popup,width=520,height=720");
+  if (!popup) {
+    throw new Error(
+      "Pop-up blocked. Allow pop-ups to connect Facebook — this preview frame cannot open Facebook itself (third-party cookies).",
+    );
+  }
+  return new Promise<string>((resolve, reject) => {
+    const origin = window.location.origin;
+    let settled = false;
+    const finish = (ok: boolean, message: string) => {
+      if (settled) return;
+      settled = true;
+      window.clearInterval(timer);
+      window.removeEventListener("message", onMsg);
+      if (ok) resolve(message);
+      else reject(new Error(message));
+    };
+    const timer = window.setInterval(() => {
+      if (!popup.closed) return;
+      window.setTimeout(() => {
+        finish(false, "Facebook window closed before finishing.");
       }, 400);
-      const onMsg = (ev: MessageEvent) => {
-        if (ev.origin !== window.location.origin) return;
-        const data = ev.data as { source?: string; ok?: boolean; message?: string };
-        if (data?.source !== "posterpal-facebook") return;
-        window.clearInterval(timer);
-        window.removeEventListener("message", onMsg);
-        if (data.ok) resolve(data.message ?? "Connected");
-        else reject(new Error(data.message ?? "Connect failed"));
-      };
-      window.addEventListener("message", onMsg);
-    });
+    }, 400);
+    const onMsg = (ev: MessageEvent) => {
+      if (ev.origin !== origin) return;
+      const data = ev.data as { source?: string; ok?: boolean; message?: string };
+      if (data?.source !== "posterpal-facebook") return;
+      finish(Boolean(data.ok), data.message ?? (data.ok ? "Connected" : "Connect failed"));
+    };
+    window.addEventListener("message", onMsg);
   });
 }

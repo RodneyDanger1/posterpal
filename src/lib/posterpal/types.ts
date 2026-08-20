@@ -179,6 +179,15 @@ export type SettingsBag = {
   cadenceBlock: number;
   setupComplete: boolean;
   oauthRedirectUri: string;
+  providers: {
+    grok: boolean;
+    openai: boolean;
+    gemini: boolean;
+    deepseek: boolean;
+    flux: boolean;
+  };
+  defaultTextProvider: string;
+  defaultImageProvider: string;
 };
 
 export type HomeSnapshot = {
@@ -188,6 +197,49 @@ export type HomeSnapshot = {
   inboxCount: number;
   quota: QuotaRow | null;
   settings: SettingsBag;
+  failedCount: number;
+  merchCount: number;
+  vaultExpiresAt: string | null;
+  mix: { Text: number; Photo: number; Carousel: number; Video: number; Reel: number; Story: number };
+  needs: NeedsItem[];
+};
+
+export type NeedsItem = {
+  id: string;
+  kind: "overdue" | "failed" | "comment" | "token" | "cadence";
+  title: string;
+  detail: string;
+  href: string;
+  pageName?: string | null;
+  urgency: "now" | "soon" | "info";
+  action?: { type: "publish" | "open-inbox"; id: string };
+};
+
+export type AgentSource = { title: string; url: string };
+
+export type AgentResult = {
+  summary: string;
+  sources: AgentSource[];
+  captions: { storytelling: string; cta: string; question: string };
+  imagePrompt: string;
+  laterTitle: string;
+  refused: string | null;
+  liveSearch: boolean;
+  runId: string;
+};
+
+export type DeviceRow = {
+  id: string;
+  name: string;
+  platform: string;
+  last_seen_at: string | null;
+  created_at: string;
+  is_revoked: boolean;
+};
+
+export type PairingTicket = {
+  code: string;
+  expiresAt: string;
 };
 
 export type ComposerInput = {
@@ -234,6 +286,8 @@ export type AnalyticsPoint = {
   media_view_unique: number | null;
   ai_variant_label: string | null;
   variant_group_id: string | null;
+  media_type?: string | null;
+  link?: string | null;
 };
 
 export type SyncResult = {

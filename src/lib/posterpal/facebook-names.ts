@@ -2,15 +2,15 @@
  * Meta App Dashboard → Basic Settings display-name rules.
  * https://developers.facebook.com/documentation/development/create-an-app/app-dashboard/basic-settings
  *
- * This product can be called PosterPal. The Facebook App you register at
- * developers.facebook.com cannot — “Book” and “Face” are treated as Facebook
- * references.
+ * PosterPal is allowed as both this desk's name and the Facebook App display name.
+ * Forbidden: Facebook, FB, Meta, Instagram, WhatsApp, and “Book” / “Face”
+ * if they read as a Facebook reference (that is why BookBoss was rejected).
  */
 export const FB_APP_NAME_SUGGESTIONS = [
+  "PosterPal",
   "PageDesk",
   "ShoreDesk",
   "DeskPages",
-  "PageOps",
   "WinonaDesk",
 ] as const;
 
@@ -22,14 +22,14 @@ const FORBIDDEN = [
   { re: /\bwhatsapp\b/i, why: "Cannot contain WhatsApp." },
   { re: /\boculus\b/i, why: "Cannot contain Oculus." },
   { re: /\bthreads\b/i, why: "Cannot contain Threads." },
-  { re: /\bbook\b/i, why: "Cannot contain “Book” — Meta reads it as a Facebook reference. Use PageDesk, ShoreDesk, or DeskPages instead of PosterPal." },
+  { re: /\bbook\b/i, why: "Cannot contain “Book” — Meta reads it as a Facebook reference. PosterPal is fine." },
   { re: /\bface\b/i, why: "Cannot contain “Face” if it could be read as Facebook." },
 ];
 
 export function facebookAppNameIssues(name: string): string[] {
   const n = name.trim();
   const issues: string[] = [];
-  if (!n) issues.push("Pick a Facebook App display name (this is not the PosterPal product name).");
+  if (!n) issues.push("Enter the display name you will type into the Facebook dashboard.");
   if (n.length > 32) issues.push("Keep it short — under 32 characters is safest for review.");
   for (const f of FORBIDDEN) {
     if (f.re.test(n)) issues.push(f.why);

@@ -65,6 +65,7 @@ export async function seedPracticeWorkspace(userId: string): Promise<void> {
   const idFarmers = randomUUID();
   const idShow = randomUUID();
   const idCta = randomUUID();
+  const idOverdue = randomUUID();
 
   const posts: SeedPost[] = [
     {
@@ -169,6 +170,18 @@ export async function seedPracticeWorkspace(userId: string): Promise<void> {
       link: "https://northshorebooks.example/tote",
       variant: "Direct CTA",
     },
+    {
+      id: idOverdue,
+      page: nsb,
+      message:
+        "Window-display polaroid from last night — the river light caught the spines. Scheduled while the desk was closed; publish when you open the phone.",
+      status: "LocalScheduled",
+      media: "Photo",
+      scheduled: hoursAgo(2),
+      reactions: 0,
+      comments: 0,
+      shares: 0,
+    },
   ];
 
   for (const p of posts) {
@@ -211,6 +224,7 @@ export async function seedPracticeWorkspace(userId: string): Promise<void> {
     { post: idStory, author: "Mark T.", msg: "We came last week and it was lovely. Thank you for the cider.", hours: 26, needs: false },
     { post: idArrivals, author: "Elena R.", msg: "Do you have the new Louise Erdrich, or is it already gone?", hours: 70, needs: true },
     { post: idCta, author: "Sam K.", msg: "Is the tote machine-washable? Need one that survives the river path.", hours: 100, needs: true },
+    { post: idCta, author: "Riley C.", msg: "How much is the tote and where can I buy it? Do you ship?", hours: 0.4, needs: true },
     { post: idFarmers, author: "Jordan P.", msg: "Will there be the honey stall this week?", hours: 18, needs: true },
     { post: idArrivals, author: "spam-bot", msg: "MAKE $5000 A DAY click this sketchy link!!!", hours: 71, needs: false, hidden: true },
   ];
@@ -240,10 +254,11 @@ export async function seedPracticeWorkspace(userId: string): Promise<void> {
   `;
 
   await sql`
-    insert into saved_ideas (id, user_id, page_id, title, body, media_type)
+    insert into saved_ideas (id, user_id, page_id, title, body, media_type, notes)
     values
-      (${randomUUID()}, ${userId}, ${nsb}, ${"River rug photo"}, ${"Need a photo of Saturday story hour — kids on the river rug, cider for grown-ups, no faces in the foreground if we can help it."}, ${"Photo"}),
-      (${randomUUID()}, ${userId}, ${ww}, ${"Thursday bands"}, ${"Two local bands at the winery. Doors 7, music 8. Cash or card. Dogs on the lawn side."}, ${"Text"})
+      (${randomUUID()}, ${userId}, ${nsb}, ${"River rug photo"}, ${"Need a photo of Saturday story hour — kids on the river rug, cider for grown-ups, no faces in the foreground if we can help it."}, ${"Photo"}, ${"photo-needed"}),
+      (${randomUUID()}, ${userId}, ${ww}, ${"Thursday bands"}, ${"Two local bands at the winery. Doors 7, music 8. Cash or card. Dogs on the lawn side."}, ${"Text"}, ${"caption-ready"}),
+      (${randomUUID()}, ${userId}, ${nsb}, ${"Tote restock"}, ${"Canvas tote is back Friday. First-comment shop link, #ad in the caption, UTM campaign tote-friday."}, ${"Photo"}, ${"offer-this-week"})
   `;
 
   await sql`
@@ -276,5 +291,38 @@ export async function ensureMemory(userId: string) {
     values
       (${randomUUID()}, ${userId}, ${a}, ${"Hours block"}, ${"Open 10–6 Tuesday through Saturday, noon–4 Sunday. Closed Monday."}),
       (${randomUUID()}, ${userId}, ${a}, ${"Staff pick closer"}, ${"Ask Maya at the desk — she will put it in your hands."})
+  `;
+}
+
+/** One overdue practice post so the Needs-you queue is never empty on a demo desk. */
+export async function ensureOverduePractice(userId: string) {
+  const sql = await getSql();
+  const live = await sql<{ n: number }>`
+    select count(*)::int as n from pages where user_id = ${userId} and is_practice = false
+  `;
+  if (Number(live[0]?.n ?? 0) > 0) return;
+  const overdue = await sql<{ n: number }>`
+    select count(*)::int as n from posts
+    where user_id = ${userId}
+      and status = 'LocalScheduled'
+      and scheduled_publish_time is not null
+      and scheduled_publish_time < now()
+  `;
+  if (Number(overdue[0]?.n ?? 0) > 0) return;
+  const page = await sql<{ id: string }>`
+    select id from pages where user_id = ${userId} and is_practice = true order by name limit 1
+  `;
+  const pageId = page[0]?.id;
+  if (!pageId) return;
+  const when = new Date(Date.now() - 2 * 3600_000).toISOString();
+  await sql`
+    insert into posts (
+      id, user_id, page_id, message, media_type, status,
+      scheduled_publish_time, created_by_this_app, created_at, updated_at
+    ) values (
+      ${randomUUID()}, ${userId}, ${pageId},
+      ${"Window-display polaroid from last night — the river light caught the spines. Scheduled while the desk was closed; publish from Needs you."},
+      ${"Photo"}, ${"LocalScheduled"}, ${when}, true, ${when}, now()
+    )
   `;
 }
