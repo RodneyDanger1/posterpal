@@ -2,14 +2,19 @@ import { randomUUID } from "node:crypto";
 import { getSql } from "@/lib/db";
 import { decryptSecret, encryptSecret } from "./crypto";
 import { GRAPH_BASE, graphFetch, REQUIRED_SCOPES } from "./graph";
+import { publicOrigin, redirectCandidates } from "./oauth-origin";
+import { setSetting } from "./repo";
 
 export async function handleFacebookCallback(request: Request): Promise<Response> {
   const url = new URL(request.url);
   const err = url.searchParams.get("error_description") ?? url.searchParams.get("error");
-  if (err) return htmlClose(`Facebook returned an error: ${err}`);
+  if (err) {
+    await rememberError("anonymous", `Facebook returned: ${err}`, publicOrigin(request));
+    return htmlResult(`Facebook returned an error: ${err}`, false, publicOrigin(request));
+  }
   const code = url.searchParams.get("code");
   const state = url.searchParams.get("state");
-  if (!code || !state) return htmlClose("Missing code or state from Facebook.");
+  if (!code || !state) return htmlResult("Missing code or state from Facebook.", false, publicOrigin(request));
 
   const sql = await getSql();
   const states = await sql<{ user_id: string }>`
@@ -17,7 +22,7 @@ export async function handleFacebookCallback(request: Request): Promise<Response
   `;
   const userId = states[0]?.user_id;
   if (!userId) {
-    return htmlClose("OAuth state expired or invalid. Close this window and try Connect again.");
+    return htmlResult("OAuth state expired or invalid. Close this window and click Connect again.", false, publicOrigin(request));
   }
   await sql`delete from oauth_states where state = ${state}`;
 
@@ -30,82 +35,129 @@ export async function handleFacebookCallback(request: Request): Promise<Response
   const appId = appRows[0]?.value_plain ?? decryptSecret(appRows[0]?.value_enc) ?? "";
   const appSecret = decryptSecret(secretRows[0]?.value_enc) ?? secretRows[0]?.value_plain ?? "";
   if (!appId || !appSecret) {
-    return htmlClose("Facebook App ID or Secret is missing. Save them in Settings first.");
+    await rememberError(userId, "Facebook App ID or Secret is missing. Save them in Settings first.", publicOrigin(request));
+    return htmlResult("Facebook App ID or Secret is missing. Save them in Settings first.", false, publicOrigin(request));
   }
 
-  const redirectUri = `${url.origin}/api/facebook/callback`;
   try {
-    const short = await exchangeToken({
-      client_id: appId,
-      client_secret: appSecret,
-      redirect_uri: redirectUri,
-      code,
+    const short = await exchangeCode(appId, appSecret, code, request);
+    if (!short.access_token) {
+      await rememberError(userId, "Token exchange returned no access_token.", publicOrigin(request));
+      return htmlResult("Token exchange returned no access_token.", false, publicOrigin(request));
+    }
+
+    const imported = await persistUserToken(userId, {
+      appId,
+      appSecret,
+      shortToken: short.access_token,
+      expiresIn: short.expires_in,
     });
-    if (!short.access_token) return htmlClose("Token exchange returned no access_token.");
-
-    let longLived = short.access_token;
-    let expiresAt: string | null = short.expires_in
-      ? new Date(Date.now() + short.expires_in * 1000).toISOString()
-      : null;
-    try {
-      const longTok = await exchangeToken({
-        grant_type: "fb_exchange_token",
-        client_id: appId,
-        client_secret: appSecret,
-        fb_exchange_token: short.access_token,
-      });
-      if (longTok.access_token) longLived = longTok.access_token;
-      if (longTok.expires_in) expiresAt = new Date(Date.now() + longTok.expires_in * 1000).toISOString();
-    } catch {
-      /* short-lived still usable for /me/accounts */
-    }
-
-    let dataAccessExpires: string | null = null;
-    let isValid = true;
-    let scopes = REQUIRED_SCOPES.join(",");
-    try {
-      const debug = await graphFetch<{
-        data?: {
-          is_valid?: boolean;
-          scopes?: string[];
-          expires_at?: number;
-          data_access_expires_at?: number;
-        };
-      }>({
-        path: "/debug_token",
-        token: `${appId}|${appSecret}`,
-        appSecret,
-        query: { input_token: longLived },
-      });
-      const d = debug.data.data;
-      if (d) {
-        isValid = d.is_valid !== false;
-        if (d.scopes?.length) scopes = d.scopes.join(",");
-        if (d.expires_at) expiresAt = new Date(d.expires_at * 1000).toISOString();
-        if (d.data_access_expires_at) {
-          dataAccessExpires = new Date(d.data_access_expires_at * 1000).toISOString();
-        }
-      }
-    } catch {
-      /* debug_token is best-effort */
-    }
-
-    await sql`
-      insert into token_vault (
-        id, user_id, name, user_token_enc, long_lived_token_enc, expires_at,
-        data_access_expires_at, scopes, last_validated_at, is_valid
-      ) values (
-        ${randomUUID()}, ${userId}, ${"Facebook user"}, ${encryptSecret(short.access_token)},
-        ${encryptSecret(longLived)}, ${expiresAt}, ${dataAccessExpires}, ${scopes}, now(), ${isValid}
-      )
-    `;
-
-    const imported = await importFacebookAccounts(userId, longLived, appSecret);
-    return htmlClose(`Connected. Imported ${imported} Page${imported === 1 ? "" : "s"}. You can close this window.`, true);
+    await setSetting(userId, "facebook_last_error", null, false);
+    await setSetting(userId, "facebook_last_connect_ok", "1", false);
+    await setSetting(userId, "facebook_last_connect_at", new Date().toISOString(), false);
+    return htmlResult(
+      `Connected. Imported ${imported} Page${imported === 1 ? "" : "s"}. You can close this window.`,
+      true,
+      publicOrigin(request),
+    );
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    return htmlClose(`Facebook connect failed: ${msg}`);
+    await rememberError(userId, msg, publicOrigin(request));
+    return htmlResult(`Facebook connect failed: ${msg}`, false, publicOrigin(request));
   }
+}
+
+export async function importPastedUserToken(
+  userId: string,
+  rawToken: string,
+): Promise<{ imported: number }> {
+  const token = rawToken.trim();
+  if (token.length < 20) throw new Error("That does not look like a Facebook user token.");
+  const sql = await getSql();
+  const appRows = await sql<{ value_plain: string | null; value_enc: string | null }>`
+    select value_plain, value_enc from app_settings where user_id = ${userId} and key = 'facebook_app_id'
+  `;
+  const secretRows = await sql<{ value_plain: string | null; value_enc: string | null }>`
+    select value_plain, value_enc from app_settings where user_id = ${userId} and key = 'facebook_app_secret'
+  `;
+  const appId = appRows[0]?.value_plain ?? decryptSecret(appRows[0]?.value_enc) ?? "";
+  const appSecret = decryptSecret(secretRows[0]?.value_enc) ?? secretRows[0]?.value_plain ?? "";
+  if (!appId || !appSecret) {
+    throw new Error("Save App ID and App Secret in Settings first, then paste the token.");
+  }
+  const imported = await persistUserToken(userId, {
+    appId,
+    appSecret,
+    shortToken: token,
+  });
+  await setSetting(userId, "facebook_last_error", null, false);
+  await setSetting(userId, "facebook_last_connect_ok", "1", false);
+  await setSetting(userId, "facebook_last_connect_at", new Date().toISOString(), false);
+  return { imported };
+}
+
+async function persistUserToken(
+  userId: string,
+  input: { appId: string; appSecret: string; shortToken: string; expiresIn?: number },
+): Promise<number> {
+  const sql = await getSql();
+  let longLived = input.shortToken;
+  let expiresAt: string | null = input.expiresIn
+    ? new Date(Date.now() + input.expiresIn * 1000).toISOString()
+    : null;
+  try {
+    const longTok = await exchangeToken({
+      grant_type: "fb_exchange_token",
+      client_id: input.appId,
+      client_secret: input.appSecret,
+      fb_exchange_token: input.shortToken,
+    });
+    if (longTok.access_token) longLived = longTok.access_token;
+    if (longTok.expires_in) expiresAt = new Date(Date.now() + longTok.expires_in * 1000).toISOString();
+  } catch {
+    /* short-lived still usable for /me/accounts */
+  }
+
+  let dataAccessExpires: string | null = null;
+  let isValid = true;
+  let scopes = REQUIRED_SCOPES.join(",");
+  try {
+    const debug = await graphFetch<{
+      data?: {
+        is_valid?: boolean;
+        scopes?: string[];
+        expires_at?: number;
+        data_access_expires_at?: number;
+      };
+    }>({
+      path: "/debug_token",
+      token: `${input.appId}|${input.appSecret}`,
+      appSecret: input.appSecret,
+      query: { input_token: longLived },
+    });
+    const d = debug.data.data;
+    if (d) {
+      isValid = d.is_valid !== false;
+      if (d.scopes?.length) scopes = d.scopes.join(",");
+      if (d.expires_at) expiresAt = new Date(d.expires_at * 1000).toISOString();
+      if (d.data_access_expires_at) {
+        dataAccessExpires = new Date(d.data_access_expires_at * 1000).toISOString();
+      }
+    }
+  } catch {
+    /* debug_token is best-effort */
+  }
+
+  await sql`
+    insert into token_vault (
+      id, user_id, name, user_token_enc, long_lived_token_enc, expires_at,
+      data_access_expires_at, scopes, last_validated_at, is_valid
+    ) values (
+      ${randomUUID()}, ${userId}, ${"Facebook user"}, ${encryptSecret(input.shortToken)},
+      ${encryptSecret(longLived)}, ${expiresAt}, ${dataAccessExpires}, ${scopes}, now(), ${isValid}
+    )
+  `;
+  return importFacebookAccounts(userId, longLived, input.appSecret);
 }
 
 export async function importFacebookAccounts(userId: string, userToken: string, appSecret: string): Promise<number> {
@@ -229,10 +281,47 @@ export async function refreshVaultTokens(userId: string): Promise<{ refreshed: b
   }
 }
 
+async function exchangeCode(
+  appId: string,
+  appSecret: string,
+  code: string,
+  request: Request,
+): Promise<{ access_token?: string; expires_in?: number }> {
+  const candidates = redirectCandidates(request);
+  let last: Error | null = null;
+  for (const redirect_uri of candidates) {
+    try {
+      return await exchangeToken({
+        client_id: appId,
+        client_secret: appSecret,
+        redirect_uri,
+        code,
+      });
+    } catch (e) {
+      last = e instanceof Error ? e : new Error(String(e));
+    }
+  }
+  throw last ?? new Error("Token exchange failed.");
+}
+
+async function rememberError(userId: string, message: string, origin: string) {
+  try {
+    if (userId && userId !== "anonymous") {
+      await setSetting(userId, "facebook_last_error", message.slice(0, 500), false);
+      await setSetting(userId, "facebook_last_redirect", `${origin}/api/facebook/callback`, false);
+      await setSetting(userId, "facebook_last_connect_ok", "0", false);
+    }
+  } catch {
+    /* best-effort */
+  }
+}
+
 async function exchangeToken(params: Record<string, string>): Promise<{ access_token?: string; expires_in?: number }> {
-  const u = new URL(`${GRAPH_BASE}/oauth/access_token`);
-  for (const [k, v] of Object.entries(params)) u.searchParams.set(k, v);
-  const res = await fetch(u, { method: "GET" });
+  const res = await fetch(`${GRAPH_BASE}/oauth/access_token`, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams(params),
+  });
   const json = (await res.json()) as {
     access_token?: string;
     expires_in?: number;
@@ -244,13 +333,39 @@ async function exchangeToken(params: Record<string, string>): Promise<{ access_t
   return json;
 }
 
-function htmlClose(message: string, ok = false): Response {
+function htmlResult(message: string, ok: boolean, origin: string): Response {
   const payload = JSON.stringify({ source: "posterpal-facebook", ok, message });
-  const body = `<!doctype html><html><body style="font-family:Segoe UI,system-ui,sans-serif;padding:32px;background:#F0F2F5;color:#050505">
-  <p>${escapeHtml(message)}</p>
+  let hostname = "";
+  let siteUrl = origin;
+  let redirect = `${origin}/api/facebook/callback`;
+  try {
+    const u = new URL(origin);
+    hostname = u.hostname;
+    siteUrl = `${u.protocol}//${u.host}`;
+    redirect = `${siteUrl}/api/facebook/callback`;
+  } catch {
+    /* keep origin */
+  }
+  const extra = ok
+    ? `<p style="color:#65676B;font-size:13px">This window will close.</p>`
+    : `<div style="margin-top:16px;padding:12px;background:#fff;border-radius:8px;font-size:13px;line-height:1.45;color:#050505">
+        <p style="margin:0 0 8px"><strong>Facebook “domain isn’t included”</strong> — add these three, then Save Changes:</p>
+        <p style="margin:8px 0 0">App Domains (Settings → Basic)</p>
+        <code style="display:block;padding:8px;background:#F0F2F5;border-radius:6px;word-break:break-all">${escapeHtml(hostname)}</code>
+        <p style="margin:8px 0 0">Website Site URL (Settings → Basic → Add platform → Website)</p>
+        <code style="display:block;padding:8px;background:#F0F2F5;border-radius:6px;word-break:break-all">${escapeHtml(siteUrl)}/</code>
+        <p style="margin:8px 0 0">Valid OAuth Redirect URI (Facebook Login → Settings)</p>
+        <code style="display:block;padding:8px;background:#F0F2F5;border-radius:6px;word-break:break-all">${escapeHtml(redirect)}</code>
+        <p style="margin:12px 0 0">Wait 30 seconds after saving. Client OAuth Login and Web OAuth Login must be ON. You must be Admin/Developer/Tester. Display name PosterPal (not Book).</p>
+        <p style="margin:12px 0 0">If it still fails: Settings → paste a User Token from Graph API Explorer (select your app). Never paste App Secret in chat.</p>
+      </div>
+      <p style="margin-top:16px"><button onclick="window.close()" style="padding:8px 14px;border:0;border-radius:6px;background:#1877F2;color:#fff;font-weight:600;cursor:pointer">Close</button></p>`;
+  const body = `<!doctype html><html><body style="font-family:Segoe UI,system-ui,sans-serif;padding:32px;background:#F0F2F5;color:#050505;max-width:560px">
+  <p style="font-size:16px">${escapeHtml(message)}</p>
+  ${extra}
   <script>
-    try { window.opener && window.opener.postMessage(${payload}, window.location.origin); } catch (e) {}
-    setTimeout(function(){ window.close(); }, 400);
+    try { window.opener && window.opener.postMessage(${payload}, "*"); } catch (e) {}
+    ${ok ? "setTimeout(function(){ window.close(); }, 700);" : ""}
   </script>
   </body></html>`;
   return new Response(body, {

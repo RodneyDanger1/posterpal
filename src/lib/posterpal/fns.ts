@@ -424,3 +424,18 @@ export const listAgentRunsFn = createServerFn({ method: "GET" })
     const ops = await import("./ops");
     return ops.listAgentRuns(context.userId, data.pageId);
   });
+
+export const facebookStatusFn = createServerFn({ method: "GET" })
+  .middleware([authMiddleware])
+  .handler(async ({ context }) => {
+    const ops = await import("./ops");
+    return ops.facebookConnectStatus(context.userId);
+  });
+
+export const importFacebookTokenFn = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((d: { token: string }) => d)
+  .handler(async ({ context, data }) => {
+    const ops = await import("./ops");
+    return ops.importPastedToken(context.userId, data.token);
+  });

@@ -209,6 +209,10 @@ export async function startPractice(userId: string) {
 export async function beginFacebookOAuth(userId: string, redirectUri: string) {
   const appId = await getSetting(userId, "facebook_app_id");
   if (!appId) throw new Error("Enter your Facebook App ID first.");
+  const secret = await getSetting(userId, "facebook_app_secret");
+  if (!secret) throw new Error("Enter your Facebook App Secret and click Save credentials first.");
+  await setSetting(userId, "facebook_last_redirect", redirectUri, false);
+  await setSetting(userId, "facebook_last_error", null, false);
   const state = randomBytes(24).toString("hex");
   const sql = await getSql();
   await sql`
@@ -216,7 +220,32 @@ export async function beginFacebookOAuth(userId: string, redirectUri: string) {
     values (${state}, ${userId}, now() + interval '15 minutes')
   `;
   const url = buildAuthorizeUrl({ clientId: appId, redirectUri, state });
-  return { url, state, version: GRAPH_VERSION, scopes: [...REQUIRED_SCOPES] };
+  return { url, state, version: GRAPH_VERSION, scopes: [...REQUIRED_SCOPES], redirectUri };
+}
+
+export async function facebookConnectStatus(userId: string) {
+  const settings = await getSettings(userId);
+  if (settings.facebookConnected) {
+    return {
+      ok: true as const,
+      message: settings.livePageCount
+        ? `Connected. ${settings.livePageCount} live Page${settings.livePageCount === 1 ? "" : "s"} imported.`
+        : "Facebook user token saved. No Pages with CREATE_CONTENT came back from /me/accounts.",
+      lastError: null as string | null,
+      livePageCount: settings.livePageCount,
+    };
+  }
+  return {
+    ok: false as const,
+    message: settings.facebookLastError || "Not connected yet.",
+    lastError: settings.facebookLastError,
+    livePageCount: settings.livePageCount,
+  };
+}
+
+export async function importPastedToken(userId: string, token: string) {
+  const { importPastedUserToken } = await import("./facebook-oauth");
+  return importPastedUserToken(userId, token);
 }
 
 export const listPages = listPagesRepo;
@@ -264,6 +293,9 @@ export async function reschedule(userId: string, data: { postId: string; schedul
   const sql = await getSql();
   const post = await getPost(userId, data.postId);
   if (!post) throw new Error("Post not found");
+  if (post.status === "Published") {
+    throw new Error("Published posts cannot be rescheduled. Duplicate into Composer if you need a new slot.");
+  }
   const when = new Date(data.scheduledAt);
   if (Number.isNaN(when.getTime())) throw new Error("Pick a valid date and time.");
   const windowNote = facebookScheduleWindow(when);
@@ -364,6 +396,9 @@ export async function cancelPost(userId: string, postId: string) {
   const sql = await getSql();
   const post = await getPost(userId, postId);
   if (!post) throw new Error("Post not found");
+  if (post.status === "Published") {
+    throw new Error("Cannot cancel a published post from this desk. Hide or delete it on Facebook if you must.");
+  }
   if (post.facebook_post_id && post.created_by_this_app && !post.facebook_post_id.startsWith("practice_")) {
     try {
       const token = await getPageToken(userId, post.page_id);

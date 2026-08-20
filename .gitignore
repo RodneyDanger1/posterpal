@@ -4,3 +4,10 @@ node_modules/
 .env
 .env.*
 .posterpal-pglite/
+screenshots/
+dist/
+.output/
+.vercel/
+*.log
+.DS_Store
+artifacts/

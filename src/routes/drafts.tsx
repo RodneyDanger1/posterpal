@@ -20,7 +20,9 @@ function Drafts() {
   const navigate = useNavigate();
   const [posts, setPosts] = useState<PostRow[]>([]);
   const load = () => {
-    void listPostsFn({ data: { pageId, limit: 100 } }).then(setPosts);
+    void listPostsFn({ data: { pageId, limit: 100 } })
+      .then(setPosts)
+      .catch((e: unknown) => toast.error(e instanceof Error ? e.message : "Could not load drafts"));
   };
   useEffect(load, [pageId]);
 
@@ -88,7 +90,8 @@ function Drafts() {
                       size="sm"
                       variant="outline"
                       onClick={() => {
-                        void getPostBundle({ data: { postId: p.id } }).then((bundle) => {
+                        void getPostBundle({ data: { postId: p.id } })
+                          .then((bundle) => {
                           setPrefill({
                             message: p.message ?? "",
                             pageId: p.page_id,
@@ -107,7 +110,8 @@ function Drafts() {
                               : undefined,
                           });
                           void navigate({ to: "/composer" });
-                        });
+                        })
+                          .catch((e: unknown) => toast.error(e instanceof Error ? e.message : "Could not open post"));
                       }}
                     >
                       Open in Composer
@@ -127,7 +131,12 @@ function Drafts() {
                       size="sm"
                       variant="outline"
                       onClick={() => {
-                        void cancelPostFn({ data: { postId: p.id } }).then(load);
+                        void cancelPostFn({ data: { postId: p.id } })
+                          .then(() => {
+                            toast.message("Cancelled.");
+                            load();
+                          })
+                          .catch((e: unknown) => toast.error(e instanceof Error ? e.message : "Could not cancel"));
                       }}
                     >
                       Cancel

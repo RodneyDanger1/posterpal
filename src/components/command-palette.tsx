@@ -66,10 +66,12 @@ export function CommandPalette({
               ["/drafts", "Drafts"],
               ["/calendar", "Calendar"],
               ["/inbox", "Inbox"],
+              ["/agent", "Desk agent"],
               ["/analytics", "Analytics"],
               ["/media", "Media library"],
               ["/merchandise", "Merchandise"],
               ["/vault", "Token vault"],
+              ["/pair", "Pair a phone"],
               ["/settings", "Settings"],
             ].map(([path, label]) => (
               <Command.Item

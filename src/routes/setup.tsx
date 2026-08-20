@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
   completeSetup,
+  facebookStatusFn,
   getSettingsFn,
   saveFacebookApp,
   startPractice,
@@ -14,6 +15,7 @@ import {
 import { connectFacebookPopup, facebookCallbackUri } from "@/lib/posterpal/connect-client";
 import { REQUIRED_SCOPES } from "@/lib/posterpal/constants";
 import { FacebookNameHelp } from "@/components/facebook-name-help";
+import { FacebookDomainHelp } from "@/components/facebook-domain-help";
 
 export const Route = createFileRoute("/setup")({ component: SetupPage });
 
@@ -56,7 +58,8 @@ function SetupWizard() {
   const connect = async () => {
     setBusy(true);
     try {
-      const msg = await connectFacebookPopup();
+      if (appId.trim()) await saveFacebookApp({ data: { appId, appSecret } });
+      const msg = await connectFacebookPopup(() => facebookStatusFn());
       toast.success(msg);
       setStep(4);
     } catch (e) {
@@ -105,6 +108,9 @@ function SetupWizard() {
             <li>Permissions: {REQUIRED_SCOPES.join(", ")}</li>
             <li>Page tokens come from <code className="rounded bg-muted px-1">/me/accounts</code>. CREATE_CONTENT is required to publish; ANALYZE-only Pages import as read-only.</li>
           </ol>
+          <div className="mt-4">
+            <FacebookDomainHelp />
+          </div>
           <FacebookNameHelp />
           <div className="mt-5 flex flex-wrap gap-2">
             <Button onClick={() => setStep(2)}>I have an App ID</Button>
@@ -140,8 +146,9 @@ function SetupWizard() {
 
       {step === 3 ? (
         <Panel title="Connect Facebook" body="Opens Facebook Login in a pop-up so this preview frame stays on PosterPal. Allow pop-ups for this site — Facebook cookies cannot run inside the embedded preview.">
-          <p className="text-[13px] text-muted-foreground">
-            Redirect URI that must be on the app: <code className="rounded bg-muted px-1 text-foreground">{redirect}</code>
+          <FacebookDomainHelp />
+          <p className="mt-3 text-[13px] text-muted-foreground">
+            If Facebook still says the domain isn’t included, you missed App Domains or Site URL — not the App Secret. Or skip and paste a User Token in Settings.
           </p>
           <div className="mt-5 flex flex-wrap gap-2">
             <Button onClick={() => void connect()} disabled={busy}>

@@ -29,6 +29,8 @@ export function buildAuthorizeUrl(opts: {
     redirect_uri: opts.redirectUri,
     state: opts.state,
     response_type: "code",
+    display: "popup",
+    auth_type: "rerequest",
     scope: REQUIRED_SCOPES.join(","),
   });
   return `${OAUTH_DIALOG}?${params.toString()}`;

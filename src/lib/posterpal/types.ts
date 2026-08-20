@@ -188,6 +188,10 @@ export type SettingsBag = {
   };
   defaultTextProvider: string;
   defaultImageProvider: string;
+  facebookLastError: string | null;
+  facebookLastRedirect: string | null;
+  facebookConnected: boolean;
+  livePageCount: number;
 };
 
 export type HomeSnapshot = {

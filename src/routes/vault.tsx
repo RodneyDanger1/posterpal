@@ -1,5 +1,6 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
+import { toast } from "sonner";
 import { Guard } from "@/components/guard";
 import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
@@ -14,8 +15,12 @@ function Vault() {
   const [items, setItems] = useState<VaultRow[]>([]);
   const [logs, setLogs] = useState<SchedulerLogRow[]>([]);
   useEffect(() => {
-    void vaultFn().then(setItems);
-    void logsFn().then(setLogs);
+    void vaultFn()
+      .then(setItems)
+      .catch((e: unknown) => toast.error(e instanceof Error ? e.message : "Could not load vault"));
+    void logsFn()
+      .then(setLogs)
+      .catch((e: unknown) => toast.error(e instanceof Error ? e.message : "Could not load log"));
   }, []);
 
   return (
@@ -43,7 +48,7 @@ function Vault() {
               </div>
               {alarm === "soon" || alarm === "expired" ? (
                 <p className="mt-2 rounded-md bg-warning/20 px-3 py-2 text-[13px]">
-                  Reconnect in Settings before Graph starts returning 190. Long-lived user tokens last ~60 days; Page tokens are re-derived from /me/accounts.
+                  <Link to="/settings" className="underline">Reconnect in Settings</Link> before Graph starts returning 190. Long-lived user tokens last ~60 days; Page tokens are re-derived from /me/accounts.
                 </p>
               ) : null}
               <div className="text-[12px] text-muted-foreground">Last validated {relativeTime(v.last_validated_at)}</div>

@@ -23,6 +23,8 @@ import {
   saveSnippetFn,
   snippetsFn,
   imaginePhotoFn,
+  runAgentFn,
+  analyzeFn,
 } from "@/lib/posterpal/fns";
 import { applyUtm, captionHint, captionStats, countHashtags, hasCallToAction, isQuietHour, suggestedIndustrySlot, trimHashtags } from "@/lib/posterpal/operator";
 import { IMAGE_PROVIDERS, TEXT_PROVIDERS } from "@/lib/posterpal/providers";
@@ -115,6 +117,7 @@ function useComposerState() {
       setWhen(prefill.when);
       setMode("schedule");
     }
+    if (prefill.link) setLink(prefill.link);
     setPrefill(null);
   }, [prefill, setPrefill, setPageId]);
 
@@ -122,9 +125,9 @@ function useComposerState() {
 
   useEffect(() => {
     if (!selected) return;
-    void merchFn({ data: { pageId: selected.id } }).then(setMerch);
-    void cadenceFn({ data: { pageId: selected.id } }).then(setCadence);
-    void snippetsFn({ data: { pageId: selected.id } }).then(setSnippets);
+    void merchFn({ data: { pageId: selected.id } }).then(setMerch).catch(() => setMerch([]));
+    void cadenceFn({ data: { pageId: selected.id } }).then(setCadence).catch(() => setCadence(null));
+    void snippetsFn({ data: { pageId: selected.id } }).then(setSnippets).catch(() => setSnippets([]));
     void mediaLibraryFn({ data: { pageId: selected.id } })
       .then(setLibrary)
       .catch(() => setLibrary([]));
@@ -138,7 +141,7 @@ function useComposerState() {
           pageId: selected.id,
           message,
           link: link || null,
-          merchUrl: (merch.find((m) => m.id === selectedMerchId) ?? merch[0])?.url ?? null,
+          merchUrl: merch.find((m) => m.id === selectedMerchId)?.url ?? null,
           hasImages: media.length > 0,
           missingAlt: media.some((m) => !m.altText.trim()),
           createdWithAi: media.some((m) => m.createdWithAi),
@@ -329,6 +332,10 @@ function Composer() {
                     size="sm"
                     variant={s.selectedMerchId === m.id ? "default" : "outline"}
                     onClick={() => {
+                      if (s.selectedMerchId === m.id) {
+                        s.setSelectedMerchId(null);
+                        return;
+                      }
                       s.setSelectedMerchId(m.id);
                       s.setLink(applyUtm(m.url, m.utm_template));
                       if (m.cta_override) s.setMessage((prev) => (prev ? `${prev}\n\n${m.cta_override}` : m.cta_override!));
@@ -349,7 +356,7 @@ function Composer() {
                   onChange={(e) => {
                     const on = e.target.checked;
                     s.setShopInFirstComment(on);
-                    const m = s.merch.find((x) => x.id === s.selectedMerchId) ?? s.merch[0];
+                    const m = s.merch.find((x) => x.id === s.selectedMerchId);
                     if (on && m) s.setFirstComment(applyUtm(m.url, m.utm_template, "first-comment"));
                   }}
                 />
@@ -462,7 +469,7 @@ function Composer() {
 
           <div className="flex flex-wrap gap-2">
             <Hint label="Runs the selected mode: publish, schedule, local draft, or Facebook draft.">
-              <Button disabled={s.busy || s.cadence?.level === "block"} onClick={() => void submit(s, s.mode)}>
+              <Button disabled={s.busy || (s.cadence?.level === "block" && s.mode !== "local-draft")} onClick={() => void submit(s, s.mode)}>
                 {s.busy ? "Working…" : "Send"}
               </Button>
             </Hint>
@@ -518,7 +525,7 @@ function Composer() {
                 disabled={s.busy || !s.message.trim()}
                 onClick={() => {
                   s.setBusy(true);
-                  const merch = s.merch.find((m) => m.id === s.selectedMerchId) ?? s.merch[0];
+                  const merch = s.merch.find((m) => m.id === s.selectedMerchId);
                   void generateVariantsFn({
                     data: {
                       pageId: s.selected!.id,
@@ -537,6 +544,53 @@ function Composer() {
                 }}
               >
                 3 variants
+              </Button>
+            </Hint>
+            <Hint label="Scores the caption for risk flags and topics. Does not post.">
+              <Button
+                variant="outline"
+                disabled={s.busy || !s.message.trim()}
+                onClick={() => {
+                  s.setBusy(true);
+                  void analyzeFn({ data: { content: s.message } })
+                    .then((a) => {
+                      const bits = [
+                        a.sentiment ? `Tone: ${a.sentiment}` : null,
+                        a.topics?.length ? `Topics: ${a.topics.slice(0, 4).join(", ")}` : null,
+                        a.riskFlags?.length ? `Flags: ${a.riskFlags.join("; ")}` : null,
+                      ].filter(Boolean);
+                      toast.message(bits.join(" · ") || "No flags.");
+                    })
+                    .catch((e: unknown) => toast.error(e instanceof Error ? e.message : "Analyze failed"))
+                    .finally(() => s.setBusy(false));
+                }}
+              >
+                Check caption
+              </Button>
+            </Hint>
+            <Hint label="Live-searches the public web, then writes three captions in this Page’s voice. Nothing is posted. You pick one and click Send.">
+              <Button
+                variant="outline"
+                disabled={s.busy || !s.message.trim()}
+                onClick={() => {
+                  s.setBusy(true);
+                  void runAgentFn({
+                    data: { pageId: s.selected!.id, prompt: s.message, provider: s.textProvider },
+                  })
+                    .then((r) => {
+                      if (r.refused) {
+                        toast.message(r.refused);
+                        return;
+                      }
+                      s.setVariants(r.captions);
+                      if (!s.variantGroupId) s.setVariantGroupId(crypto.randomUUID());
+                      toast.success(r.liveSearch ? "Researched. Pick a variant — you still click Send." : "Drafted without live search. Verify facts, then you click Send.");
+                    })
+                    .catch((e: unknown) => toast.error(e instanceof Error ? e.message : "Research failed"))
+                    .finally(() => s.setBusy(false));
+                }}
+              >
+                Research
               </Button>
             </Hint>
             <Hint label="Appends up to 6 relevant hashtags. Max 3 in a live caption is the policy default.">
@@ -676,10 +730,19 @@ async function submit(s: ReturnType<typeof useComposerState>, mode: Mode) {
     toast.error("Cadence hard cap reached.");
     return;
   }
+  const needsFile = s.mediaType === "Photo" || s.mediaType === "Carousel" || s.mediaType === "Video" || s.mediaType === "Reel" || s.mediaType === "Story";
+  if (needsFile && s.media.length === 0 && mode !== "local-draft") {
+    toast.error(`${s.mediaType} needs a file. Drop one, generate a still, or save a local draft.`);
+    return;
+  }
+  if (mode === "schedule" && !s.when) {
+    toast.error("Pick a date and time, or tap Suggested hour.");
+    return;
+  }
   s.setBusy(true);
   try {
     const scheduledAt = s.when ? new Date(s.when).toISOString() : null;
-    const merch = s.merch.find((m) => m.id === s.selectedMerchId) ?? s.merch[0];
+    const merch = s.merch.find((m) => m.id === s.selectedMerchId) ?? null;
     const result = await composeFn({
       data: {
         pageId: s.selected.id,

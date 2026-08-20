@@ -30,7 +30,9 @@ function Later() {
   const [column, setColumn] = useState<LaterColumnId>("inbox");
 
   const load = () => {
-    void ideasFn({ data: {} }).then(setRows);
+    void ideasFn({ data: {} })
+      .then(setRows)
+      .catch((e: unknown) => toast.error(e instanceof Error ? e.message : "Could not load Later"));
   };
   useEffect(load, []);
 

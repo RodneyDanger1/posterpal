@@ -24,7 +24,7 @@ const MORE = [
 export function MobileNav({ inboxCount = 0 }: { inboxCount?: number }) {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const [more, setMore] = useState(false);
-  const moreActive = MORE.some((i) => pathname === i.to || (i.to !== "/" && pathname.startsWith(i.to)));
+  const moreActive = MORE.some((i) => pathname === i.to || pathname.startsWith(i.to));
 
   return (
     <>

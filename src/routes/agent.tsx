@@ -33,7 +33,10 @@ function AgentDesk() {
   const reloadHistory = (id?: string) => {
     void listAgentRunsFn({ data: { pageId: id } })
       .then(setHistory)
-      .catch(() => setHistory([]));
+      .catch((e: unknown) => {
+        setHistory([]);
+        toast.error(e instanceof Error ? e.message : "Could not load agent history");
+      });
   };
 
   useEffect(() => {

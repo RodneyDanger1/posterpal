@@ -22,7 +22,7 @@ import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { UserButton } from "@/lib/auth/gates";
 import { useCurrentUserState } from "@/lib/auth/use-current-user";
-import { bootstrapApp, searchFn, syncNowFn, tickFn } from "@/lib/posterpal/fns";
+import { bootstrapApp, savePrefs, searchFn, syncNowFn, tickFn } from "@/lib/posterpal/fns";
 import type { HomeSnapshot, PageRow } from "@/lib/posterpal/types";
 import { adoptLivePageId, useShellStore } from "@/lib/store";
 import { cn, formatFanCount } from "@/lib/utils";
@@ -166,6 +166,7 @@ export function AppShell({ children, right }: { children: React.ReactNode; right
                 onClick={() => {
                   setSelectedPageId(p.id);
                   setRailOpen(false);
+                  void savePrefs({ data: { defaultPageId: p.id } });
                 }}
               />
             ))
@@ -257,7 +258,11 @@ export function AppShell({ children, right }: { children: React.ReactNode; right
                 variant="ghost"
                 size="icon"
                 aria-label="Toggle theme"
-                onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+                onClick={() => {
+                  const next = theme === "dark" ? "light" : "dark";
+                  setTheme(next);
+                  void savePrefs({ data: { theme: next } });
+                }}
               >
                 {theme === "dark" ? <Sun className="size-4" /> : <Moon className="size-4" />}
               </Button>

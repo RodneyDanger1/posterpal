@@ -36,6 +36,16 @@ function whenOf(p: CalPost) {
   return new Date(p.scheduled_publish_time ?? p.published_time ?? p.created_at);
 }
 
+function canDrag(status: string) {
+  return (
+    status === "LocalScheduled" ||
+    status === "FacebookScheduled" ||
+    status === "LocalDraft" ||
+    status === "FacebookDraft" ||
+    status === "Failed"
+  );
+}
+
 function CalendarView() {
   const pageId = useShellStore((s) => s.selectedPageId) ?? undefined;
   const setPrefill = useShellStore((s) => s.setComposerPrefill);
@@ -47,7 +57,9 @@ function CalendarView() {
   const [pick, setPick] = useState<{ postId: string; when: string } | null>(null);
 
   const load = () => {
-    void calendarFn({ data: { pageId } }).then(setPosts);
+    void calendarFn({ data: { pageId } })
+      .then(setPosts)
+      .catch((e: unknown) => toast.error(e instanceof Error ? e.message : "Calendar failed"));
   };
   useEffect(load, [pageId]);
 
@@ -210,8 +222,10 @@ function CalendarView() {
                     {items.map((p) => (
                       <div
                         key={p.id}
-                        draggable
-                        onDragStart={() => setDragId(p.id)}
+                        draggable={canDrag(p.status)}
+                        onDragStart={() => {
+                          if (canDrag(p.status)) setDragId(p.id);
+                        }}
                         title={`${p.status} · ${p.media_type} · ${format(whenOf(p), "h:mm a")}`}
                         className="cursor-grab rounded-md bg-chip px-1.5 py-1 text-[11px] leading-tight"
                       >

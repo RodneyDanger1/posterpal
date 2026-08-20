@@ -19,9 +19,13 @@ The setup wizard includes a live name checker. Safe alternatives: PageDesk, Shor
 5. Valid OAuth Redirect URIs:
    - This web app: `https://<your-host>/api/facebook/callback`
    - Windows WPF kernel: `http://127.0.0.1:55443/callback/` (exact)
-6. **Keep Development Mode.** Add the operator as Admin, Developer, or Tester.
-7. **App Review is not required** if only app roles use this desk.
-8. Paste App ID + App Secret into PosterPal Settings. Never paste the secret into chat.
+6. **App Domains** (Settings → Basic): the hostname only, no `https://`. Facebook rejects `127.0.0.1` here — leave empty for localhost.
+7. **Website Site URL** (Settings → Basic → Add platform → Website): `https://<your-host>/`
+8. **Keep Development Mode.** Add the operator as Admin, Developer, or Tester.
+9. **App Review is not required** if only app roles use this desk.
+10. Paste App ID + App Secret into PosterPal Settings. Never paste the secret into chat.
+
+**Where those URLs come from:** PosterPal Settings copies them from the URL you are using *right now*. The Grok live preview is not a forever host — after you publish or run the desk on your PC, open Settings on *that* URL and update Facebook.
 
 Official references:
 

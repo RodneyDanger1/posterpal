@@ -25,7 +25,9 @@ function Media() {
   const [settings, setSettings] = useState<SettingsBag | null>(null);
 
   useEffect(() => {
-    void mediaLibraryFn({ data: { pageId } }).then(setRows);
+    void mediaLibraryFn({ data: { pageId } })
+      .then(setRows)
+      .catch((e: unknown) => toast.error(e instanceof Error ? e.message : "Could not load media"));
   }, [pageId]);
   useEffect(() => {
     void getSettingsFn().then((s) => {

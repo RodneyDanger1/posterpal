@@ -1,5 +1,6 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
+import { toast } from "sonner";
 import { Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { Guard } from "@/components/guard";
 import { PageHeader } from "@/components/page-header";
@@ -26,7 +27,9 @@ function Analytics() {
   } | null>(null);
 
   useEffect(() => {
-    void analyticsFn({ data: { pageId, days } }).then(setPack);
+    void analyticsFn({ data: { pageId, days } })
+      .then(setPack)
+      .catch((e: unknown) => toast.error(e instanceof Error ? e.message : "Analytics failed"));
   }, [pageId, days]);
 
   const series = useMemo(() => {
@@ -87,13 +90,15 @@ function Analytics() {
           variant="outline"
           title="Download the visible window as CSV"
           onClick={() => {
-            void exportCsvFn({ data: { pageId, days } }).then((csv) => {
+            void exportCsvFn({ data: { pageId, days } })
+              .then((csv) => {
               const blob = new Blob([csv], { type: "text/csv" });
               const a = document.createElement("a");
               a.href = URL.createObjectURL(blob);
               a.download = "posterpal-analytics.csv";
               a.click();
-            });
+            })
+              .catch((e: unknown) => toast.error(e instanceof Error ? e.message : "Export failed"));
           }}
         >
           Export CSV

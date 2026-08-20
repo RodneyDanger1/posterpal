@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Guard } from "@/components/guard";
@@ -16,6 +16,8 @@ export const Route = createFileRoute("/merchandise")({ component: () => <Guard><
 
 function Merch() {
   const pageId = useShellStore((s) => s.selectedPageId);
+  const setPrefill = useShellStore((s) => s.setComposerPrefill);
+  const navigate = useNavigate();
   const [pages, setPages] = useState<PageRow[]>([]);
   const [rows, setRows] = useState<MerchRow[]>([]);
   const [title, setTitle] = useState("");
@@ -56,6 +58,20 @@ function Merch() {
                 {r.cta_override ? <div className="mt-1 text-sm">{r.cta_override}</div> : null}
               </div>
               <div className="flex shrink-0 flex-col gap-2">
+              <Button
+                size="sm"
+                onClick={() => {
+                  setPrefill({
+                    message: r.cta_override || `Shop ${r.title}`,
+                    pageId: r.page_id,
+                    mediaType: "Text",
+                    link: applyUtm(r.url, r.utm_template),
+                  });
+                  void navigate({ to: "/composer" });
+                }}
+              >
+                Use in Composer
+              </Button>
               <Button
                 size="sm"
                 variant="outline"

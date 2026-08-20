@@ -31,14 +31,17 @@ function Inbox() {
   const [active, setActive] = useState<CommentRow | null>(null);
   const [draft, setDraft] = useState("");
   const [syncing, setSyncing] = useState(false);
+  const [phoneDetail, setPhoneDetail] = useState(false);
 
   const load = () => {
     const serverFilter = filter === "intent" ? "all" : filter;
-    void commentsFn({ data: { filter: serverFilter, pageId } }).then((list) => {
+    void commentsFn({ data: { filter: serverFilter, pageId } })
+      .then((list) => {
       const next = filter === "intent" ? list.filter((c) => isBuyingIntent(c.message)) : list;
       setRows(next);
       setActive((cur) => next.find((c) => c.id === cur?.id) ?? next[0] ?? null);
-    });
+    })
+      .catch((e: unknown) => toast.error(e instanceof Error ? e.message : "Could not load inbox"));
   };
   useEffect(load, [filter, pageId]);
 
@@ -61,7 +64,9 @@ function Inbox() {
         });
       }
       if (e.key === "e" && active) {
-        void markCommentHandledFn({ data: { commentId: active.id } }).then(load);
+        void markCommentHandledFn({ data: { commentId: active.id } })
+          .then(load)
+          .catch((err: unknown) => toast.error(err instanceof Error ? err.message : "Could not mark handled"));
       }
     };
     window.addEventListener("keydown", onKey);
@@ -78,7 +83,7 @@ function Inbox() {
 
   return (
     <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]">
-      <div>
+      <div className={phoneDetail ? "hidden lg:block" : undefined}>
         <div className="flex flex-wrap items-start justify-between gap-2">
           <PageHeader
             title="Inbox"
@@ -119,7 +124,10 @@ function Inbox() {
               <li key={c.id}>
                 <button
                   type="button"
-                  onClick={() => setActive(c)}
+                  onClick={() => {
+                    setActive(c);
+                    setPhoneDetail(true);
+                  }}
                   className={`w-full rounded-lg px-3 py-2 text-left ${active?.id === c.id ? "bg-accent" : "bg-card hover:bg-muted"}`}
                 >
                   <div className="flex items-center justify-between gap-2">
@@ -142,7 +150,15 @@ function Inbox() {
       </div>
 
       {active ? (
-        <article className="rounded-xl bg-card p-4 shadow-card">
+        <article className={`rounded-xl bg-card p-4 shadow-card ${phoneDetail ? "" : "hidden lg:block"}`}>
+          <Button
+            size="sm"
+            variant="outline"
+            className="mb-3 lg:hidden"
+            onClick={() => setPhoneDetail(false)}
+          >
+            Back to list
+          </Button>
           <div className="text-[12px] text-muted-foreground">
             {active.page_name} · on “{active.post_message?.slice(0, 80)}”
           </div>
@@ -236,7 +252,7 @@ function Inbox() {
           </div>
         </article>
       ) : (
-        <div className="rounded-xl bg-card p-6 text-sm text-muted-foreground shadow-card">Select a comment.</div>
+        <div className="hidden rounded-xl bg-card p-6 text-sm text-muted-foreground shadow-card lg:block">Select a comment.</div>
       )}
     </div>
   );

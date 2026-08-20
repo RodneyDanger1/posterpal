@@ -45,6 +45,7 @@ export async function setSetting(
 }
 
 export async function loadSettings(userId: string, origin: string): Promise<SettingsBag> {
+  const sql = await getSql();
   const [
     facebookAppId,
     facebookSecret,
@@ -59,6 +60,9 @@ export async function loadSettings(userId: string, origin: string): Promise<Sett
     falKey,
     defaultTextProvider,
     defaultImageProvider,
+    facebookLastError,
+    facebookLastRedirect,
+    facebookLastOk,
   ] = await Promise.all([
     getSetting(userId, "facebook_app_id"),
     getSetting(userId, "facebook_app_secret"),
@@ -73,8 +77,15 @@ export async function loadSettings(userId: string, origin: string): Promise<Sett
     getSetting(userId, "fal_api_key"),
     getSetting(userId, "default_text_provider"),
     getSetting(userId, "default_image_provider"),
+    getSetting(userId, "facebook_last_error"),
+    getSetting(userId, "facebook_last_redirect"),
+    getSetting(userId, "facebook_last_connect_ok"),
   ]);
   const grok = Boolean(process.env.XAI_API_KEY);
+  const live = await sql<{ n: number }>`
+    select count(*)::int as n from pages
+    where user_id = ${userId} and is_practice = false and facebook_page_id is not null
+  `;
   return {
     facebookAppId: facebookAppId ?? "",
     hasFacebookSecret: Boolean(facebookSecret),
@@ -94,6 +105,10 @@ export async function loadSettings(userId: string, origin: string): Promise<Sett
     },
     defaultTextProvider: defaultTextProvider || (grok ? "grok" : openaiKey ? "openai" : googleKey ? "gemini" : deepseekKey ? "deepseek" : "grok"),
     defaultImageProvider: defaultImageProvider || (grok ? "grok" : googleKey ? "gemini" : openaiKey ? "openai" : falKey ? "flux" : "grok"),
+    facebookLastError: facebookLastOk === "1" ? null : facebookLastError,
+    facebookLastRedirect: facebookLastRedirect,
+    facebookConnected: facebookLastOk === "1" || Number(live[0]?.n ?? 0) > 0,
+    livePageCount: Number(live[0]?.n ?? 0),
   };
 }
 

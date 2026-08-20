@@ -15,6 +15,7 @@ export type ComposerPrefill = {
   mediaType?: string;
   media?: PrefillMedia[];
   when?: string;
+  link?: string;
 };
 
 type ShellState = {
@@ -106,7 +107,7 @@ export const useShellStore = create<ShellState>()(
     {
       name: "posterpal-shell",
       storage: createJSONStorage(() => iframeSafeStorage()),
-      partialize: (s) => ({ theme: s.theme }),
+      partialize: (s) => ({ theme: s.theme, selectedPageId: s.selectedPageId }),
       onRehydrateStorage: () => (state) => {
         if (state?.theme) applyThemeClass(state.theme);
       },
