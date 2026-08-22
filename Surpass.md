@@ -260,7 +260,7 @@ Every app table is scoped by `user_id`.
 - [`scripts/browser-smoke.mjs`](scripts/browser-smoke.mjs) — Playwright load + screenshot → `/workspace/screenshots/`
 - [`scripts/migrate.mjs`](scripts/migrate.mjs)
 - [`scripts/qa-desk.mjs`](scripts/qa-desk.mjs)
-- `npm test` — tsx test runner on `scripts/**/*.test.mjs` (Windows-safe; 66 tests, 59 pass — the 7 fails are pre-existing grok-pwa platform tests)
+- `npm test` — tsx test runner on `scripts/**/*.test.mjs` (Windows-safe; 76 tests, 76 pass)
 - `npm run typecheck` / `npm run build`
 
 ### 3.11 Docs already in-repo
@@ -498,7 +498,7 @@ Verified against the live tree AND the running app (`npm run dev` on `:8080`, pr
 - **New fixes this session (not in the audit):** npm scripts were **broken on Windows** (`VITE_AUTH_ENABLED=…` env syntax → `cross-env` added); `npm test` found **0 tests on Windows** (quoted glob → unquoted + `tsx` runner); `scripts/worker.ts` (Phase 1 worker, refuses without `DATABASE_URL`); `crypto.ts` refuses the preview fallback key when `NODE_ENV=production`; analytics A/B "Leading variant" no longer renders an empty label.
 - **Round 3 (app pass, 2026-08-21):** composer `submit` re-checks policy fresh before blocking — the 250ms policy debounce left a stale empty-caption block for fast Sends; `facebook-names.ts` missed compound brand names (`\bbook\b` never matched BookBoss, `\binsta\b` missed InstaBook, `\bfb\b` missed FBPal) — now start-of-word matching with tests. App pass also verified: calendar Week/Heatmap/drag-reschedule, schedule auto-fill best slot, multi-Page compose, drafts cancel/retry, inbox intent tab + j/k/e, settings theme/seed-guard, pairing error path, setup wizard, media no-key error, merch add.
 
-Regression tests: `scripts/phase0.test.mjs` (graph error map, schedule window, feed payload shapes, per-Page fitness, FB app-name rules). `npm test` = 70 tests, 63 pass (the 7 fails are the pre-existing `grok-pwa-plugin.test.mjs` platform tests — §13.6).
+Regression tests: `scripts/phase0.test.mjs` (graph error map, schedule window, feed payload shapes, per-Page fitness, FB app-name rules, carousel partial warning), `scripts/db-pglite.test.mjs` (PGLite data-dir). `npm test` = 76 tests, 76 pass (grok-pwa plugin tests un-staled in this session).
 
 ### Critical
 
@@ -872,7 +872,7 @@ Do not remove `PreviewHostBridge`, `grokPwaPlugin`, or `server/middleware/grok-p
 
 ### 13.6 Tests that already fail
 
-`scripts/grok-pwa-plugin.test.mjs` has been a pre-existing platform test. Do not burn a day on it unless you touched that plugin. HMAC tests must stay green.
+**Resolved 2026-08-22.** The 7 `grok-pwa-plugin.test.mjs` failures were stale tests: the injector was refactored from positional args to a `ctx` object, but the tests still called the old signature. Updated all call sites (and two assertions whose old expectations — "don't inject og:title", "leave an existing twitter:card alone" — no longer match the canonical behavior). The whole suite is green: `npm test` = 76 tests, 76 pass.
 
 ### 13.7 Timezone
 
