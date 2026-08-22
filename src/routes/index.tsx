@@ -180,17 +180,20 @@ function PagesHome() {
 
       {(() => {
         const selected = data.pages.find((p) => p.id === selectedPageId) ?? data.pages[0];
-        const mixDiversity = Object.values(data.mix ?? {}).filter((n) => n > 0).length;
-        const postedLast24h = data.recentPosts.filter((p) => {
-          const t = new Date(p.published_time ?? p.created_at).getTime();
-          return Date.now() - t < 86_400_000 && (p.status === "Published" || p.status === "FacebookScheduled");
-        }).length;
+        const pm = selected ? data.pageMetrics[selected.id] : undefined;
+        const mixDiversity = pm ? pm.mixDiversity : Object.values(data.mix ?? {}).filter((n) => n > 0).length;
+        const postedLast24h = pm
+          ? pm.postedLast24h
+          : data.recentPosts.filter((p) => {
+              const t = new Date(p.published_time ?? p.created_at).getTime();
+              return Date.now() - t < 86_400_000 && (p.status === "Published" || p.status === "FacebookScheduled");
+            }).length;
         const fit = monetizationFitness({
           fanCount: selected?.fan_count ?? 0,
-          merchCount: data.merchCount ?? 0,
+          merchCount: pm ? pm.merchCount : (data.merchCount ?? 0),
           mixDiversity,
-          inboxCount: data.inboxCount,
-          failedCount: data.failedCount ?? 0,
+          inboxCount: pm ? pm.inboxCount : data.inboxCount,
+          failedCount: pm ? pm.failedCount : (data.failedCount ?? 0),
           vaultExpiresAt: data.vaultExpiresAt ?? null,
           postedLast24h,
           cadenceWarn: data.settings.cadenceWarn,

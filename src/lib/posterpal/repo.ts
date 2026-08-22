@@ -308,7 +308,7 @@ export async function listComments(
   const sql = await getSql();
   if (pageId && filter === "needs") {
     const rows = await sql<Record<string, unknown>>`
-      select c.*, po.message as post_message, pa.name as page_name
+      select c.*, po.message as post_message, pa.name as page_name, pa.id as page_id
       from comments c
       join posts po on po.id = c.post_id
       join pages pa on pa.id = po.page_id
@@ -320,7 +320,7 @@ export async function listComments(
   }
   if (pageId && filter === "hidden") {
     const rows = await sql<Record<string, unknown>>`
-      select c.*, po.message as post_message, pa.name as page_name
+      select c.*, po.message as post_message, pa.name as page_name, pa.id as page_id
       from comments c
       join posts po on po.id = c.post_id
       join pages pa on pa.id = po.page_id
@@ -331,7 +331,7 @@ export async function listComments(
   }
   if (pageId) {
     const rows = await sql<Record<string, unknown>>`
-      select c.*, po.message as post_message, pa.name as page_name
+      select c.*, po.message as post_message, pa.name as page_name, pa.id as page_id
       from comments c
       join posts po on po.id = c.post_id
       join pages pa on pa.id = po.page_id
@@ -342,7 +342,7 @@ export async function listComments(
   }
   if (filter === "needs") {
     const rows = await sql<Record<string, unknown>>`
-      select c.*, po.message as post_message, pa.name as page_name
+      select c.*, po.message as post_message, pa.name as page_name, pa.id as page_id
       from comments c
       join posts po on po.id = c.post_id
       join pages pa on pa.id = po.page_id
@@ -354,7 +354,7 @@ export async function listComments(
   }
   if (filter === "hidden") {
     const rows = await sql<Record<string, unknown>>`
-      select c.*, po.message as post_message, pa.name as page_name
+      select c.*, po.message as post_message, pa.name as page_name, pa.id as page_id
       from comments c
       join posts po on po.id = c.post_id
       join pages pa on pa.id = po.page_id
@@ -364,7 +364,7 @@ export async function listComments(
     return rows.map(mapComment);
   }
   const rows = await sql<Record<string, unknown>>`
-    select c.*, po.message as post_message, pa.name as page_name
+    select c.*, po.message as post_message, pa.name as page_name, pa.id as page_id
     from comments c
     join posts po on po.id = c.post_id
     join pages pa on pa.id = po.page_id
@@ -377,7 +377,7 @@ export async function listComments(
 export async function listCommentsForPost(userId: string, postId: string): Promise<CommentRow[]> {
   const sql = await getSql();
   const rows = await sql<Record<string, unknown>>`
-    select c.*, po.message as post_message, pa.name as page_name
+    select c.*, po.message as post_message, pa.name as page_name, pa.id as page_id
     from comments c
     join posts po on po.id = c.post_id
     join pages pa on pa.id = po.page_id
@@ -404,6 +404,7 @@ function mapComment(r: Record<string, unknown>): CommentRow {
     created_at: String(r.created_at),
     post_message: r.post_message == null ? null : String(r.post_message),
     page_name: r.page_name == null ? undefined : String(r.page_name),
+    page_id: r.page_id == null ? undefined : String(r.page_id),
   };
 }
 

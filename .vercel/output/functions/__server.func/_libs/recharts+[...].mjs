@@ -1,5 +1,5 @@
 import { o as __toESM, r as __exportAll } from "../_runtime.mjs";
-import { c as require_react } from "./@radix-ui/react-collection+[...].mjs";
+import { u as require_react } from "./@floating-ui/react-dom+[...].mjs";
 import { n as clsx } from "./class-variance-authority+clsx.mjs";
 import { C as require_isFunction, S as require_memoize, _ as require_isNaN, a as require_range, b as require_isNil, c as require_last, d as require_min, f as require_max, g as require_upperFirst, h as require_uniqBy, i as require_some, l as require_isEqual, m as require_sortBy, n as require_every, o as require_isBoolean, p as require_throttle, r as require_mapValues, s as require_isPlainObject, t as require_find, u as require_flatMap, v as require_isNumber, w as require_isObject, x as require_get, y as require_isString } from "./lodash.mjs";
 import { t as require_react_is } from "./react-is.mjs";

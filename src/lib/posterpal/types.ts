@@ -95,6 +95,7 @@ export type CommentRow = {
   created_at: string;
   post_message?: string | null;
   page_name?: string;
+  page_id?: string;
 };
 
 export type MerchRow = {
@@ -194,6 +195,15 @@ export type SettingsBag = {
   livePageCount: number;
 };
 
+export type PageMetrics = {
+  mix: { Text: number; Photo: number; Carousel: number; Video: number; Reel: number; Story: number };
+  mixDiversity: number;
+  failedCount: number;
+  merchCount: number;
+  inboxCount: number;
+  postedLast24h: number;
+};
+
 export type HomeSnapshot = {
   pages: PageRow[];
   recentPosts: PostRow[];
@@ -205,6 +215,7 @@ export type HomeSnapshot = {
   merchCount: number;
   vaultExpiresAt: string | null;
   mix: { Text: number; Photo: number; Carousel: number; Video: number; Reel: number; Story: number };
+  pageMetrics: Record<string, PageMetrics>;
   needs: NeedsItem[];
 };
 
@@ -215,6 +226,7 @@ export type NeedsItem = {
   detail: string;
   href: string;
   pageName?: string | null;
+  pageId?: string | null;
   urgency: "now" | "soon" | "info";
   action?: { type: "publish" | "open-inbox"; id: string };
 };

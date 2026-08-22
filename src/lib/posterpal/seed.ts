@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { getSql } from "@/lib/db";
 import { localSentiment } from "./ai";
+import { setSetting } from "./repo";
 
 export async function seedPracticeWorkspace(userId: string): Promise<void> {
   const sql = await getSql();
@@ -271,8 +272,16 @@ export async function seedPracticeWorkspace(userId: string): Promise<void> {
 
 export async function ensureMemory(userId: string) {
   const sql = await getSql();
+  // Seed once per desk. Re-seeding on count=0 resurrects Later cards the operator deleted.
+  const seeded = await sql<{ n: number }>`
+    select count(*)::int as n from app_settings where user_id = ${userId} and key = 'memory_seeded_once'
+  `;
+  if (Number(seeded[0]?.n ?? 0) > 0) return;
   const ideas = await sql<{ n: number }>`select count(*)::int as n from saved_ideas where user_id = ${userId}`;
-  if (Number(ideas[0]?.n ?? 0) > 0) return;
+  if (Number(ideas[0]?.n ?? 0) > 0) {
+    await setSetting(userId, "memory_seeded_once", "1", false);
+    return;
+  }
   const pages = await sql<{ id: string; name: string }>`
     select id, name from pages where user_id = ${userId} order by name limit 2
   `;

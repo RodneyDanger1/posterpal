@@ -69,11 +69,12 @@ function Analytics() {
   const winners = useMemo(() => {
     const groups = new Map<string, { label: string; n: number; reactions: number }>();
     for (const r of series) {
-      if (!r.variant) continue;
-      const g = groups.get(r.variant) ?? { label: r.variant, n: 0, reactions: 0 };
+      const label = String(r.variant ?? "").trim();
+      if (!label) continue;
+      const g = groups.get(label) ?? { label, n: 0, reactions: 0 };
       g.n += 1;
       g.reactions += r.reactions;
-      groups.set(r.variant, g);
+      groups.set(label, g);
     }
     return [...groups.values()].sort((a, b) => b.reactions / Math.max(1, b.n) - a.reactions / Math.max(1, a.n));
   }, [series]);
@@ -309,7 +310,7 @@ function Analytics() {
           </CardHeader>
           <CardContent>
             <p className="text-sm">
-              Leading variant: <strong>{winners[0]?.label}</strong> ({Math.round((winners[0]?.reactions ?? 0) / Math.max(1, winners[0]?.n ?? 1))} avg reactions).
+              Leading variant: <strong>{winners[0]?.label?.trim() ? winners[0].label : "Unlabeled variant"}</strong> ({Math.round((winners[0]?.reactions ?? 0) / Math.max(1, winners[0]?.n ?? 1))} avg reactions).
             </p>
             <ul className="mt-2 space-y-1 text-sm text-muted-foreground">
               {winners.map((w) => (

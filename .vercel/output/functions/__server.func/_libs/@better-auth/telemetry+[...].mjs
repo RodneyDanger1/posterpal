@@ -1,8 +1,8 @@
 import { $t as createRandomStringGenerator, H as base64Url, V as base64, dn as getBooleanEnvVar, fn as getEnvVar, hn as isTest, ln as ENV, nn as betterFetch, sn as logger, un as env } from "./core+[...].mjs";
 import fs from "node:fs";
+import path from "node:path";
 import fsPromises from "node:fs/promises";
 import os from "node:os";
-import path from "node:path";
 //#region node_modules/@better-auth/utils/dist/index.mjs
 function getWebcryptoSubtle() {
 	const cr = typeof globalThis !== "undefined" && globalThis.crypto;

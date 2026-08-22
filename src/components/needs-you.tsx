@@ -65,7 +65,12 @@ export function NeedsYou({
                 ) : null}
                 {item.action?.type === "open-inbox" ? (
                   <Button size="sm" variant="outline" asChild>
-                    <Link to="/inbox">Inbox</Link>
+                    <Link
+                      to="/inbox"
+                      search={{ comment: item.action!.id, page: item.pageId ?? undefined }}
+                    >
+                      Inbox
+                    </Link>
                   </Button>
                 ) : (
                   <Button

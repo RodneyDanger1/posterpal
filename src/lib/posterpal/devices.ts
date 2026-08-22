@@ -157,8 +157,9 @@ export async function needsYou(userId: string): Promise<NeedsItem[]> {
     author_name: string | null;
     created_at: string;
     page_name: string;
+    page_id: string;
   }>`
-    select c.id, c.message, c.author_name, c.created_at, pa.name as page_name
+    select c.id, c.message, c.author_name, c.created_at, pa.name as page_name, pa.id as page_id
     from comments c
     join posts po on po.id = c.post_id
     join pages pa on pa.id = po.page_id
@@ -185,6 +186,7 @@ export async function needsYou(userId: string): Promise<NeedsItem[]> {
       detail: c.message.slice(0, 160),
       href: "/inbox",
       pageName: c.page_name,
+      pageId: c.page_id,
       urgency: gold || buy ? "now" : "soon",
       action: { type: "open-inbox", id: c.id },
     });

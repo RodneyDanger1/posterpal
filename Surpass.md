@@ -255,10 +255,12 @@ Every app table is scoped by `user_id`.
 
 - [`scripts/hmac.test.mjs`](scripts/hmac.test.mjs) — Graph proof vector
 - [`scripts/silent-bugs.test.mjs`](scripts/silent-bugs.test.mjs)
+- [`scripts/phase0.test.mjs`](scripts/phase0.test.mjs) — §8 regressions: graph error map, schedule window, feed payload shapes, per-Page fitness
+- [`scripts/worker.ts`](scripts/worker.ts) — Phase 1 background worker (`npm run worker`; tickScheduler + syncFromGraph + refreshVaultTokens every 60s; requires `DATABASE_URL`)
 - [`scripts/browser-smoke.mjs`](scripts/browser-smoke.mjs) — Playwright load + screenshot → `/workspace/screenshots/`
 - [`scripts/migrate.mjs`](scripts/migrate.mjs)
 - [`scripts/qa-desk.mjs`](scripts/qa-desk.mjs)
-- `npm test` — node test runner on `scripts/**/*.test.mjs`
+- `npm test` — tsx test runner on `scripts/**/*.test.mjs` (Windows-safe; 66 tests, 59 pass — the 7 fails are pre-existing grok-pwa platform tests)
 - `npm run typecheck` / `npm run build`
 
 ### 3.11 Docs already in-repo
@@ -416,9 +418,9 @@ Ship tests for: HMAC (exists), cadence window, reschedule-updates-not-creates, s
 
 This is how we become a real Buffer alternative.
 
-1. **Worker process** — `node scripts/worker.mjs` (or a Nitro scheduled route) calling `tickScheduler` + `syncFromGraph` + `refreshVaultTokens` every 60s. `startup.sh` starts it. Docker `command` starts it.
-2. **Docker Compose** — `web` + `worker` + `postgres` (or PGLite volume for single-node). Caddy/nginx TLS.
-3. **Encryption key** — require `POSTERPAL_MASTER_KEY` (or `BETTER_AUTH_SECRET`) in production; refuse to boot with the preview fallback string.
+1. **Worker process** — `node scripts/worker.mjs` (or a Nitro scheduled route) calling `tickScheduler` + `syncFromGraph` + `refreshVaultTokens` every 60s. `startup.sh` starts it. Docker `command` starts it. **Status: `scripts/worker.ts` exists** (`npm run worker`; runs via tsx, resolves the single operator id from `app_settings`, refuses to start without `DATABASE_URL` — PGLite is in-process). Startup.sh starts it when `DATABASE_URL` is set. Remaining: a real Postgres to run against + Docker wiring.
+2. **Docker Compose** — `web` + `worker` + `postgres` (or PGLite volume for single-node). Caddy/nginx TLS. **Status: sketch in §9.5; not implemented.**
+3. **Encryption key** — require `POSTERPAL_MASTER_KEY` (or `BETTER_AUTH_SECRET`) in production; refuse to boot with the preview fallback string. **Status: done** — `crypto.ts` throws at first encrypt/decrypt when `NODE_ENV=production` and only the preview fallback is present, and `POSTERPAL_MASTER_KEY` is now honored ahead of `BETTER_AUTH_SECRET`.
 4. **Media on disk/S3** — store `content_items` as files (`data/media/{user}/{id}`) not megabyte data URLs.
 5. **Timezone** — persist `settings.timezone` (default `America/Chicago`), use in heatmap, quiet hours, chips, calendar.
 6. **Pairing actually auths** — send `Authorization: Bearer ppd_…` **or** stop claiming revoke works. Document same-origin vs device token.
@@ -481,6 +483,19 @@ Only after Phase 1. Options:
 ## 8. Known bugs to fix first (audit 2026-08-21)
 
 Ranked by user-visible damage. **Do these before Recycle buttons.**
+
+### Status sweep 2026-08-21 (this session, after the last 36 commits)
+
+Verified against the live tree AND the running app (`npm run dev` on `:8080`, practice Pages):
+
+- **1–5 (Critical): all fixed in tree.** Graph-100 fallback is gated on `mode==="schedule"` + `/schedul/i` (`publish.ts`); `rescheduleFn` → `ops.reschedule` which PATCHes `scheduled_publish_time` / DELETE+local; token wipe uses `coalesce` (`facebook-oauth.ts`); `tickScheduler` claims with `WHERE status='LocalScheduled' RETURNING` and `graphFetch` never retries POST after timeout; writes (`compose`/`saveAndDispatch`) use the raw `pageId` and throw "Page not found".
+- **6–10 (High): all fixed in tree.** Sync status CASE promotes `FacebookScheduled`/`LocalScheduled` → `Published` and fires the pending first comment on promotion (`sync.ts`); cadence counts posts *going out* in 24h (`repo.cadenceForPage`); video/Reel ids resolved to `post_id` post-publish + sync matches `{page}_{id}`; `/me/accounts` uses `graphCollect` (25-Page cap gone); composer has a `busy` guard + Ctrl+Enter handler.
+- **11–21, 23–27, 29 (Medium): fixed in tree or acceptable as designed** (insights failure is per-post `continue`, stuck-`Publishing` fails after 2m, `Publishing` no longer a black hole, token refresh only stamps on 190, `publishExisting` runs policy, library reuse preserves `created_with_ai`, inbox has a `sending` lock, `tickFn` toasts errors, calendar sets `dataTransfer`, home/analytics have error states, settings have `.catch` + live-origin hints).
+- **Fixed in this session:** #13 (Later cards no longer resurrect — `ensureMemory` seeds once via `memory_seeded_once`), #22 (Needs-you Inbox deep-links to `?comment=&page=` and selects the exact comment + Page), #30 (fitness is per-Page: `buildPageMetrics` in `ops.ts`, `HomeSnapshot.pageMetrics`).
+- **Still open / by design:** #15 (carousel proceeds with the slides that uploaded — only all-fail throws), #28 (pairing token not yet sent on API calls — Phase 1), #14 (invalidated-on-190 is intentional), #24/#25 (extra files in Photo mode are UI-level; compose reports per-Page failures in the toast).
+- **New fixes this session (not in the audit):** npm scripts were **broken on Windows** (`VITE_AUTH_ENABLED=…` env syntax → `cross-env` added); `npm test` found **0 tests on Windows** (quoted glob → unquoted + `tsx` runner); `scripts/worker.ts` (Phase 1 worker, refuses without `DATABASE_URL`); `crypto.ts` refuses the preview fallback key when `NODE_ENV=production`; analytics A/B "Leading variant" no longer renders an empty label.
+
+Regression tests: `scripts/phase0.test.mjs` (graph error map, schedule window, feed payload shapes, per-Page fitness). `npm test` = 66 tests, 59 pass (the 7 fails are the pre-existing `grok-pwa-plugin.test.mjs` platform tests — §13.6).
 
 ### Critical
 

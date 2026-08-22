@@ -1,5 +1,5 @@
 import { o as __toESM } from "../_runtime.mjs";
-import { c as require_react } from "./@radix-ui/react-collection+[...].mjs";
+import { u as require_react } from "./@floating-ui/react-dom+[...].mjs";
 import { t as require_prop_types } from "./prop-types.mjs";
 import { t as deepEqual } from "./fast-equals.mjs";
 //#region node_modules/react-smooth/es6/setRafTimeout.js

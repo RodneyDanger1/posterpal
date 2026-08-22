@@ -1,10 +1,21 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
 
+/** Preview-only entropy. NEVER use on a public host — §13.2 of Surpass.md. */
+const PREVIEW_FALLBACK_KEY = "posterpal-preview-entropy-not-a-secret";
+
 function keyBytes(): Buffer {
   const material =
+    process.env.POSTERPAL_MASTER_KEY ||
     process.env.BETTER_AUTH_SECRET ||
     process.env.GROK_AUTH_CLIENT_SECRET ||
-    "posterpal-preview-entropy-not-a-secret";
+    PREVIEW_FALLBACK_KEY;
+  if (material === PREVIEW_FALLBACK_KEY && process.env.NODE_ENV === "production") {
+    throw new Error(
+      "POSTERPAL_MASTER_KEY (or BETTER_AUTH_SECRET) is required in production. " +
+        "The preview fallback key would make every encrypted token unreadable on a public host — " +
+        "set a stable 32+ byte key and never change it.",
+    );
+  }
   return createHash("sha256").update(material).update("posterpal.dpapi.standin").digest();
 }
 

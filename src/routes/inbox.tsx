@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useLocation } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Guard } from "@/components/guard";
@@ -26,7 +26,9 @@ function draftsOf(c: CommentRow): string[] {
 }
 
 function Inbox() {
+  const location = useLocation();
   const pageId = useShellStore((s) => s.selectedPageId) ?? undefined;
+  const setSelectedPageId = useShellStore((s) => s.setSelectedPageId);
   const [filter, setFilter] = useState<"needs" | "hidden" | "all" | "intent">("needs");
   const [rows, setRows] = useState<CommentRow[]>([]);
   const [active, setActive] = useState<CommentRow | null>(null);
@@ -43,7 +45,25 @@ function Inbox() {
       .then((list) => {
       const next = filter === "intent" ? list.filter((c) => isBuyingIntent(c.message)) : list;
       setRows(next);
-      setActive((cur) => next.find((c) => c.id === cur?.id) ?? next[0] ?? null);
+      // Deep link from Needs you: ?comment=<id>&page=<pageId> selects that exact comment.
+      const params = new URLSearchParams(location.search);
+      const targetId = params.get("comment");
+      if (targetId) {
+        const target = next.find((c) => c.id === targetId) ?? null;
+        if (target) {
+          setActive(target);
+          if (target.page_id) setSelectedPageId(target.page_id);
+        } else {
+          setActive((cur) => next.find((c) => c.id === cur?.id) ?? next[0] ?? null);
+        }
+        const clean = new URLSearchParams(params);
+        clean.delete("comment");
+        clean.delete("page");
+        const qs = clean.toString();
+        window.history.replaceState(null, "", qs ? `?${qs}` : location.pathname);
+      } else {
+        setActive((cur) => next.find((c) => c.id === cur?.id) ?? next[0] ?? null);
+      }
     })
       .catch((e: unknown) => toast.error(e instanceof Error ? e.message : "Could not load inbox"));
   };

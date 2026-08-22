@@ -30,7 +30,7 @@ import { syncFromGraph } from "./sync";
 import { refreshVaultTokens } from "./facebook-oauth";
 import { deleteIdea, deleteSnippet, listIdeas, listSnippets, saveIdea, saveSnippet, updateIdea } from "./memory";
 import type { ImageProviderId, TextProviderId } from "./providers";
-import type { AnalyticsPoint, ComposerInput, MediaLibraryItem, NeedsItem, SyncResult } from "./types";
+import type { AnalyticsPoint, ComposerInput, MediaLibraryItem, NeedsItem, PageMetrics, SyncResult } from "./types";
 import {
   createPairingCode as mintPairing,
   listDevices as listPairedDevices,
@@ -81,6 +81,7 @@ export async function bootstrapApp(userId: string) {
   let merchCount = 0;
   let vaultExpiresAt: string | null = null;
   const mix = { Text: 0, Photo: 0, Carousel: 0, Video: 0, Reel: 0, Story: 0 };
+  let pageMetrics: Record<string, PageMetrics> = {};
   try {
     const sql = await getSql();
     const failed = await sql<{ n: number }>`
@@ -104,6 +105,8 @@ export async function bootstrapApp(userId: string) {
       const k = row.media_type as keyof typeof mix;
       if (k in mix) mix[k] = Number(row.n ?? 0);
     }
+    // Per-Page metrics so the fitness card is honest about which Page it labels.
+    pageMetrics = await buildPageMetrics(userId);
   } catch {
     /* desk extras must not break the shell */
   }
@@ -137,6 +140,7 @@ export async function bootstrapApp(userId: string) {
     merchCount,
     vaultExpiresAt,
     mix,
+    pageMetrics,
     needs: await needsYouSafe(userId),
   };
 }
@@ -984,5 +988,69 @@ export async function listAgentRuns(userId: string, pageId?: string) {
         order by created_at desc limit 12
       `;
   return rows;
+}
+
+/** Per-Page aggregates so the monetization fitness card is honest about which Page it labels. */
+export async function buildPageMetrics(userId: string): Promise<Record<string, PageMetrics>> {
+  const sql = await getSql();
+  const pageMetrics: Record<string, PageMetrics> = {};
+  const mixByPage = await sql<{ page_id: string; media_type: string; n: number }>`
+    select page_id, media_type, count(*)::int as n from posts
+    where user_id = ${userId} and status = 'Published'
+    group by page_id, media_type
+  `;
+  for (const row of mixByPage) {
+    const m = (pageMetrics[row.page_id] ??= emptyPageMetrics());
+    if (row.media_type in m.mix) m.mix[row.media_type as keyof typeof m.mix] = Number(row.n ?? 0);
+  }
+  const failedByPage = await sql<{ page_id: string; n: number }>`
+    select page_id, count(*)::int as n from posts
+    where user_id = ${userId} and status = 'Failed'
+    group by page_id
+  `;
+  for (const row of failedByPage) (pageMetrics[row.page_id] ??= emptyPageMetrics()).failedCount = Number(row.n ?? 0);
+  const merchByPage = await sql<{ page_id: string; n: number }>`
+    select page_id, count(*)::int as n from merchandise_links where user_id = ${userId} group by page_id
+  `;
+  for (const row of merchByPage) (pageMetrics[row.page_id] ??= emptyPageMetrics()).merchCount = Number(row.n ?? 0);
+  const inboxByPage = await sql<{ page_id: string; n: number }>`
+    select po.page_id, count(*)::int as n
+    from comments c join posts po on po.id = c.post_id
+    where c.user_id = ${userId} and c.needs_reply = true and c.is_hidden = false
+    group by po.page_id
+  `;
+  for (const row of inboxByPage) (pageMetrics[row.page_id] ??= emptyPageMetrics()).inboxCount = Number(row.n ?? 0);
+  const cadenceByPage = await sql<{ page_id: string; n: number }>`
+    select page_id, count(*)::int as n from posts
+    where user_id = ${userId}
+      and (
+        (
+          status = 'Published'
+          and coalesce(published_time, created_at) > now() - interval '24 hours'
+          and coalesce(published_time, created_at) <= now()
+        )
+        or (
+          status = 'Publishing'
+          and updated_at > now() - interval '24 hours'
+        )
+        or (
+          status in ('FacebookScheduled', 'LocalScheduled')
+          and scheduled_publish_time is not null
+          and scheduled_publish_time > now() - interval '24 hours'
+          and scheduled_publish_time <= now() + interval '24 hours'
+        )
+      )
+    group by page_id
+  `;
+  for (const row of cadenceByPage) (pageMetrics[row.page_id] ??= emptyPageMetrics()).postedLast24h = Number(row.n ?? 0);
+  for (const key of Object.keys(pageMetrics)) {
+    const m = pageMetrics[key];
+    m.mixDiversity = Object.values(m.mix).filter((n) => n > 0).length;
+  }
+  return pageMetrics;
+}
+
+function emptyPageMetrics(): PageMetrics {
+  return { mix: { Text: 0, Photo: 0, Carousel: 0, Video: 0, Reel: 0, Story: 0 }, mixDiversity: 0, failedCount: 0, merchCount: 0, inboxCount: 0, postedLast24h: 0 };
 }
 
