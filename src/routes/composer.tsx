@@ -857,6 +857,14 @@ async function submit(s: ReturnType<typeof useComposerState>, mode: Mode) {
     toast.error(`${s.mediaType} needs a file. Drop one, generate a still, or save a local draft.`);
     return;
   }
+  // #25: Photo mode posts ONE image — extra files were silently dropped.
+  if (s.mediaType === "Photo" && s.media.length > 1 && mode !== "local-draft") {
+    toast.error(
+      `Photo mode posts one image. You attached ${s.media.length}. Switch to Carousel to post them all.`,
+      { action: { label: "Switch to Carousel", onClick: () => s.setMediaType("Carousel") } },
+    );
+    return;
+  }
   if (s.mediaType === "Carousel" && s.media.length < 2 && mode !== "local-draft") {
     toast.error("Carousel needs at least two images.");
     return;
