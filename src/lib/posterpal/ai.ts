@@ -45,7 +45,7 @@ async function chatOpenAiCompat(opts: {
       ],
       ...opts.extra,
     }),
-    signal: AbortSignal.timeout(25_000),
+    signal: AbortSignal.timeout(40_000),
   });
   if (!res.ok) {
     const t = await res.text();
@@ -69,7 +69,7 @@ async function chatGemini(apiKey: string, system: string, user: string, maxToken
           contents: [{ role: "user", parts: [{ text: user }] }],
           generationConfig: { temperature: 0.7, maxOutputTokens: maxTokens },
         }),
-        signal: AbortSignal.timeout(25_000),
+        signal: AbortSignal.timeout(40_000),
       },
     );
     const t = await res.text();
@@ -287,7 +287,7 @@ export async function generateImageWithProvider(input: {
 async function grokImage(prompt: string): Promise<{ dataUrl: string; fileName: string } | { error: string }> {
   const apiKey = process.env.XAI_API_KEY;
   if (!apiKey) return { error: "Image generation needs the platform xAI key. Captions still work locally." };
-  const models = ["grok-imagine-image-2.0", "grok-imagine-image"];
+  const models = ["grok-imagine-image", "grok-imagine-image-quality"];
   let last = "Imagine API failed.";
   for (const model of models) {
     const res = await fetch("https://api.x.ai/v1/images/generations", {

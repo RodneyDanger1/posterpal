@@ -36,6 +36,8 @@ See [SETUP.md](SETUP.md).
 - **Web (this app):** TanStack Start, Postgres/PGLite, Graph v26.0 with `appsecret_proof`, AES-GCM token vault, Grok for captions/replies when `XAI_API_KEY` is present. One operator identity — no Google/X/email gate.
 - **Windows desktop:** Graph + policy kernel in [`desktop/`](desktop/). Compile on Windows 10/11 x64 with the .NET 9 SDK — this environment is Linux and cannot produce the `.exe`.
 
+**Next-agent / competitive plan:** [Surpass.md](Surpass.md) — full code map, competitor gaps, self-host + APK, Meta AI/automation rules, Phase 0 bug list.
+
 Facebook Login is bound to the hostname you paste in App Domains / Site URL / Redirect URI. The Grok preview hostname can change. A published HTTPS URL or a machine you leave on is the production host. A phone APK talks to that same HTTPS origin — it cannot reach `127.0.0.1` on your PC.
 
 ## Policy, always on

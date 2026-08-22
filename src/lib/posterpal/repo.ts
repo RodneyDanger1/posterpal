@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { getSql } from "@/lib/db";
 import { decryptSecret, encryptSecret } from "./crypto";
+import { cadenceLevel } from "./policy";
 import type {
   CadenceResult,
   CommentRow,
@@ -276,12 +277,26 @@ export async function cadenceForPage(userId: string, pageId: string): Promise<Ca
   const counts = await sql<{ n: number }>`
     select count(*)::int as n from posts
     where user_id = ${userId} and page_id = ${pageId}
-      and status in ('Published','Publishing','FacebookScheduled','LocalScheduled')
-      and coalesce(published_time, created_at) > now() - interval '24 hours'
-      and coalesce(published_time, created_at) <= now()
+      and (
+        (
+          status = 'Published'
+          and coalesce(published_time, created_at) > now() - interval '24 hours'
+          and coalesce(published_time, created_at) <= now()
+        )
+        or (
+          status = 'Publishing'
+          and updated_at > now() - interval '24 hours'
+        )
+        or (
+          status in ('FacebookScheduled', 'LocalScheduled')
+          and scheduled_publish_time is not null
+          and scheduled_publish_time > now() - interval '24 hours'
+          and scheduled_publish_time <= now() + interval '24 hours'
+        )
+      )
   `;
   const postedLast24h = Number(counts[0]?.n ?? 0);
-  const level = postedLast24h >= blockAt ? "block" : postedLast24h >= warnAt ? "warn" : "ok";
+  const level = cadenceLevel(postedLast24h, warnAt, blockAt);
   return { postedLast24h, warnAt, blockAt, level };
 }
 
@@ -355,6 +370,20 @@ export async function listComments(
     join pages pa on pa.id = po.page_id
     where c.user_id = ${userId} and c.is_from_page = false
     order by c.created_at desc limit 120
+  `;
+  return rows.map(mapComment);
+}
+
+export async function listCommentsForPost(userId: string, postId: string): Promise<CommentRow[]> {
+  const sql = await getSql();
+  const rows = await sql<Record<string, unknown>>`
+    select c.*, po.message as post_message, pa.name as page_name
+    from comments c
+    join posts po on po.id = c.post_id
+    join pages pa on pa.id = po.page_id
+    where c.user_id = ${userId} and c.post_id = ${postId}
+    order by c.created_at asc
+    limit 40
   `;
   return rows.map(mapComment);
 }

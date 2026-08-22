@@ -301,6 +301,29 @@ export async function ensureOverduePractice(userId: string) {
     select count(*)::int as n from pages where user_id = ${userId} and is_practice = false
   `;
   if (Number(live[0]?.n ?? 0) > 0) return;
+
+  const polaroid = await sql<{ id: string; status: string }>`
+    select id, status from posts
+    where user_id = ${userId}
+      and message like 'Window-display polaroid%'
+    order by created_at desc
+  `;
+  if (polaroid.length > 1) {
+    const keep =
+      polaroid.find((p) => p.status === "LocalScheduled")?.id ??
+      polaroid.find((p) => p.status === "Published")?.id ??
+      polaroid[0]?.id;
+    if (keep) {
+      await sql`
+        delete from posts
+        where user_id = ${userId}
+          and message like 'Window-display polaroid%'
+          and id <> ${keep}
+      `;
+    }
+  }
+  if (polaroid.length > 0) return;
+
   const overdue = await sql<{ n: number }>`
     select count(*)::int as n from posts
     where user_id = ${userId}

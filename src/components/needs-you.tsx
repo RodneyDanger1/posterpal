@@ -2,6 +2,7 @@ import { Link, useNavigate } from "@tanstack/react-router";
 import { toast } from "sonner";
 import { publishNowFn } from "@/lib/posterpal/fns";
 import type { NeedsItem } from "@/lib/posterpal/types";
+import { publishToast } from "@/lib/posterpal/operator";
 import { useShellStore } from "@/lib/store";
 import { Button } from "./ui/button";
 
@@ -52,7 +53,8 @@ export function NeedsYou({
                     onClick={() => {
                       void publishNowFn({ data: { postId: item.action!.id } })
                         .then((r) => {
-                          toast.success(`${r.status}${r.warning ? " — " + r.warning : ""}`);
+                          const outcome = publishToast(r.status, r.warning);
+                          toast[outcome.ok ? "success" : "error"](outcome.text);
                           onChange?.();
                         })
                         .catch((e: unknown) => toast.error(e instanceof Error ? e.message : "Publish failed"));

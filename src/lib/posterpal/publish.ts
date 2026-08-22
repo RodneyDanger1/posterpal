@@ -164,8 +164,8 @@ async function resolveCommentTarget(graphId: string, token: string, appSecret: s
 
 export async function publishExisting(userId: string, postId: string, mode: PublishMode = "now") {
   const sql = await getSql();
-  const posts = await sql<{ id: string; page_id: string; status: string }>`
-    select id, page_id, status from posts where user_id = ${userId} and id = ${postId}
+  const posts = await sql<{ id: string; page_id: string; status: string; message: string | null; link: string | null }>`
+    select id, page_id, status, message, link from posts where user_id = ${userId} and id = ${postId}
   `;
   const row = posts[0];
   if (!row) throw new Error("Post not found");
@@ -174,6 +174,18 @@ export async function publishExisting(userId: string, postId: string, mode: Publ
     throw new Error(
       `Cadence hard cap: ${cadence.postedLast24h} posts in 24h (cap ${cadence.blockAt}). Wait before publishing.`,
     );
+  }
+  const media = await listContent(userId, postId);
+  const policy = await policyForComposer(userId, row.page_id, String(row.message ?? ""), {
+    link: row.link,
+    merchUrl: null,
+    hasImages: media.length > 0,
+    missingAlt: media.some((m) => !m.alt_text?.trim()),
+    createdWithAi: media.some((m) => Boolean(m.created_with_ai)),
+  });
+  if (!policy.canPublish) {
+    const block = policy.flags.find((f) => f.severity === "block");
+    throw new Error(block?.detail ?? "Policy checklist blocked this publish.");
   }
   await sql`update posts set status = 'Publishing', updated_at = now() where id = ${postId} and user_id = ${userId}`;
   return attemptGraphPublish(userId, postId, mode);
@@ -220,43 +232,45 @@ export async function attemptGraphPublish(
   const post = posts[0];
   if (!post) throw new Error("Post not found");
   const pageId = String(post.page_id);
-  const page = await getPage(userId, pageId);
-  const media = await listContent(userId, postId);
-
-  if (page?.is_practice || !page?.facebook_page_id) {
-    if (mode === "now") {
-      await sql`
-        update posts set status = 'Published', published_time = now(), updated_at = now(),
-          facebook_post_id = ${"practice_" + postId.slice(0, 8)}
-        where id = ${postId} and user_id = ${userId}
-      `;
-      await recordLog({ userId, postId, status: "practice_published", path: "practice", durationMs: Date.now() - started });
-      return { status: "Published", warning: "Practice Page — published locally, not sent to Graph." };
-    }
-    if (mode === "schedule") {
-      await sql`update posts set status = 'LocalScheduled', updated_at = now() where id = ${postId} and user_id = ${userId}`;
-      return { status: "LocalScheduled", warning: "Practice Page — kept on the local scheduler." };
-    }
-    await sql`update posts set status = 'LocalDraft', updated_at = now() where id = ${postId} and user_id = ${userId}`;
-    return { status: "LocalDraft", warning: "Practice Page — Facebook drafts are not available. Saved locally." };
-  }
-
-  const appId = (await getSetting(userId, "facebook_app_id")) ?? "";
-  const appSecret = (await getSetting(userId, "facebook_app_secret")) ?? "";
-  const token = await getPageToken(userId, pageId);
-  if (!appId || !appSecret || !token) {
-    await failPost(userId, postId, "Missing Facebook App credentials or Page token. Reconnect in Settings.", started, "auth");
-    return { status: "Failed", warning: "Reconnect Facebook to publish." };
-  }
-
   try {
+    const page = await getPage(userId, pageId);
+    const media = await listContent(userId, postId);
+
+    if (page?.is_practice || !page?.facebook_page_id) {
+      if (mode === "now") {
+        await sql`
+          update posts set status = 'Published', published_time = now(), updated_at = now(),
+            facebook_post_id = ${"practice_" + postId.slice(0, 8)}
+          where id = ${postId} and user_id = ${userId}
+        `;
+        await recordLog({ userId, postId, status: "practice_published", path: "practice", durationMs: Date.now() - started });
+        return { status: "Published", warning: "Practice Page — published locally, not sent to Graph." };
+      }
+      if (mode === "schedule") {
+        await sql`update posts set status = 'LocalScheduled', updated_at = now() where id = ${postId} and user_id = ${userId}`;
+        return { status: "LocalScheduled", warning: "Practice Page — kept on the local scheduler." };
+      }
+      await sql`update posts set status = 'LocalDraft', updated_at = now() where id = ${postId} and user_id = ${userId}`;
+      return { status: "LocalDraft", warning: "Practice Page — Facebook drafts are not available. Saved locally." };
+    }
+
+    const appId = (await getSetting(userId, "facebook_app_id")) ?? "";
+    const appSecret = (await getSetting(userId, "facebook_app_secret")) ?? "";
+    const token = await getPageToken(userId, pageId);
+    if (!appId || !appSecret || !token) {
+      await failPost(userId, postId, "Missing Facebook App credentials or Page token. Reconnect in Settings.", started, "auth");
+      return { status: "Failed", warning: "Reconnect Facebook to publish." };
+    }
+
     const fbPageId = page.facebook_page_id;
     const message = String(post.message ?? "");
     const link = post.link ? String(post.link) : undefined;
+    const whenRaw = post.scheduled_publish_time ? new Date(String(post.scheduled_publish_time)) : null;
     const scheduledUnix =
-      mode === "schedule" && post.scheduled_publish_time
-        ? unixSeconds(new Date(String(post.scheduled_publish_time)))
-        : undefined;
+      mode === "schedule" && whenRaw && !Number.isNaN(whenRaw.getTime()) ? unixSeconds(whenRaw) : undefined;
+    if (mode === "schedule" && scheduledUnix == null) {
+      throw new Error("Pick a valid date and time to schedule on Facebook.");
+    }
     const payload = buildFeedPublishPayload({ message, link, mode, scheduledUnix });
     const mediaType = String(post.media_type);
     const ctx = { token, appSecret, fbPageId, message, payload, mode, scheduledUnix };
@@ -281,6 +295,20 @@ export async function attemptGraphPublish(
         form: { ...payload },
       });
       graphId = graphObjectId(res.data);
+    }
+
+    if ((mediaType === "Video" || mediaType === "Reel") && graphId) {
+      try {
+        const meta = await graphFetch<{ id?: string; post_id?: string }>({
+          path: `/${graphId}`,
+          token,
+          appSecret,
+          query: { fields: "id,post_id" },
+        });
+        graphId = meta.data.post_id || graphId;
+      } catch {
+        /* keep the video id; sync also matches the {page}_{id} form */
+      }
     }
 
     const nextStatus =
@@ -331,7 +359,11 @@ export async function attemptGraphPublish(
     if (err instanceof GraphRequestError && err.quota) {
       await recordQuota(userId, pageId, err.quota);
     }
-    if (mapped?.kind === "unknown_schedule" || mapped?.kind === "invalid_param") {
+    if (
+      mode === "schedule" &&
+      (mapped?.kind === "unknown_schedule" ||
+        (mapped?.kind === "invalid_param" && /schedul/i.test(mapped.message)))
+    ) {
       await sql`
         update posts set status = 'LocalScheduled', error_message = ${mapped.message}, updated_at = now()
         where id = ${postId} and user_id = ${userId}
@@ -414,7 +446,7 @@ async function publishCarousel(ctx: PublishCtx & { items: ContentItemRow[] }): P
   const ids: string[] = [];
   for (const item of ctx.items) {
     const src = await resolveMedia(item);
-    if (!src) continue;
+    if (!src) throw new Error(`Carousel image "${item.file_name}" has no file or https URL to upload.`);
     if (src.kind === "http") {
       const uploaded = await graphFetch<{ id?: string }>({
         path: `/${ctx.fbPageId}/photos`,
@@ -608,20 +640,70 @@ async function failPost(
 
 export async function tickScheduler(userId: string): Promise<number> {
   const sql = await getSql();
+
+  const stuck = await sql<{ id: string }>`
+    select id from posts
+    where user_id = ${userId}
+      and status = 'Publishing'
+      and updated_at < now() - interval '2 minutes'
+  `;
+  for (const row of stuck) {
+    await failPost(
+      userId,
+      row.id,
+      "Publish interrupted. Retry from Drafts — this row still has its media.",
+      Date.now(),
+      "stuck-publishing",
+    );
+  }
+
+  const overdue = await sql<{ id: string }>`
+    select id from posts
+    where user_id = ${userId}
+      and status = 'LocalScheduled'
+      and scheduled_publish_time is not null
+      and scheduled_publish_time < now() - interval '10 minutes'
+      and (error_message is null or error_message = '')
+  `;
+  for (const row of overdue) {
+    const msg = "Overdue — desk was closed. Publish from Needs you or Drafts.";
+    await sql`
+      update posts set error_message = ${msg}, updated_at = now()
+      where id = ${row.id} and user_id = ${userId}
+    `;
+    await recordLog({ userId, postId: row.id, status: "overdue_waiting", error: msg, path: "local-scheduler" });
+  }
+
   const due = await sql<{ id: string }>`
     select id from posts
     where user_id = ${userId}
       and status = 'LocalScheduled'
       and scheduled_publish_time is not null
       and scheduled_publish_time <= now()
+      and scheduled_publish_time >= now() - interval '10 minutes'
     order by scheduled_publish_time
     limit 8
   `;
   let n = 0;
   for (const row of due) {
-    await sql`update posts set status = 'Publishing', updated_at = now() where id = ${row.id}`;
-    await attemptGraphPublish(userId, row.id, "now");
-    n += 1;
+    try {
+      const claimed = await sql<{ id: string }>`
+        update posts set status = 'Publishing', updated_at = now()
+        where id = ${row.id} and user_id = ${userId} and status = 'LocalScheduled'
+        returning id
+      `;
+      if (!claimed[0]) continue;
+      await attemptGraphPublish(userId, row.id, "now");
+      n += 1;
+    } catch (e) {
+      await failPost(
+        userId,
+        row.id,
+        e instanceof Error ? e.message : String(e),
+        Date.now(),
+        "scheduler",
+      );
+    }
   }
   const dueGraph = await sql<{ id: string; scheduled_publish_time: string }>`
     select id, scheduled_publish_time from posts
@@ -636,8 +718,18 @@ export async function tickScheduler(userId: string): Promise<number> {
   for (const row of dueGraph) {
     const note = facebookScheduleWindow(new Date(row.scheduled_publish_time));
     if (!note) {
-      await attemptGraphPublish(userId, row.id, "schedule");
-      n += 1;
+      try {
+        await attemptGraphPublish(userId, row.id, "schedule");
+        n += 1;
+      } catch (e) {
+        await recordLog({
+          userId,
+          postId: row.id,
+          status: "scheduler_push_failed",
+          error: e instanceof Error ? e.message : String(e),
+          path: "local-scheduler",
+        });
+      }
     }
   }
   return n;
@@ -654,6 +746,7 @@ export async function policyForComposer(
     select id, message, reactions_count, comments_count, shares_count
     from posts
     where user_id = ${userId} and page_id = ${pageId} and message is not null
+      and status in ('Published','FacebookScheduled','LocalScheduled','Publishing','FacebookDraft')
     order by created_at desc
     limit 30
   `;

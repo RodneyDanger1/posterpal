@@ -16,6 +16,7 @@ export type ComposerPrefill = {
   media?: PrefillMedia[];
   when?: string | null;
   link?: string;
+  imagePrompt?: string;
 };
 
 type ShellState = {
@@ -132,3 +133,14 @@ export function adoptLivePageId(pageIds: string[], preferred?: string | null) {
   useShellStore.getState().setSelectedPageId(next);
   return next;
 }
+
+/** Ephemeral — kept off the persisted shell so HMR and cookie-blocked storage cannot drop it. */
+export const useInspectorStore = create<{
+  postId: string | null;
+  open: (id: string) => void;
+  close: () => void;
+}>((set) => ({
+  postId: null,
+  open: (id) => set({ postId: id }),
+  close: () => set({ postId: null }),
+}));

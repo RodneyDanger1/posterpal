@@ -247,6 +247,9 @@ export async function graphFetch<T = GraphJson>(opts: {
   let lastError: GraphRequestError | null = null;
 
   for (let attempt = 0; attempt < 5; attempt += 1) {
+    if (opts.signal?.aborted) {
+      throw lastError ?? new Error("Graph request aborted");
+    }
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), opts.timeoutMs ?? 100_000);
     const onAbort = () => controller.abort();
@@ -257,7 +260,7 @@ export async function graphFetch<T = GraphJson>(opts: {
         const parsed = await parseGraphResponse(res);
         return { data: parsed.json as T, quota: parsed.quota, status: res.status };
       } catch (e) {
-        if (e instanceof GraphRequestError && e.mapped.retryable && attempt < 4) {
+        if (e instanceof GraphRequestError && e.mapped.retryable && attempt < 4 && !opts.signal?.aborted) {
           lastError = e;
           await sleep(400 * 2 ** attempt);
           continue;
@@ -266,6 +269,9 @@ export async function graphFetch<T = GraphJson>(opts: {
       }
     } catch (e) {
       if (e instanceof GraphRequestError) throw e;
+      if (opts.signal?.aborted) throw e;
+      // Timeouts after a POST can already have created the Graph object — do not retry publishes.
+      if (method !== "GET") throw e;
       if (attempt < 4) {
         await sleep(400 * 2 ** attempt);
         continue;
@@ -316,10 +322,6 @@ export async function graphMultipart<T = GraphJson>(opts: {
       }
     } catch (e) {
       if (e instanceof GraphRequestError) throw e;
-      if (attempt < 3) {
-        await sleep(400 * 2 ** attempt);
-        continue;
-      }
       throw lastError ?? e;
     } finally {
       clearTimeout(timer);
@@ -399,3 +401,32 @@ export function graphObjectId(data: { id?: string; post_id?: string; video_id?: 
 export function unixSeconds(d: Date): number {
   return Math.floor(d.getTime() / 1000);
 }
+
+/** Follow Graph paging.cursors.after so /me/accounts is not silently capped at 25. */
+export async function graphCollect<T = Record<string, unknown>>(opts: {
+  path: string;
+  token: string;
+  appSecret: string;
+  query?: Record<string, string | number | boolean | undefined>;
+  maxPages?: number;
+}): Promise<T[]> {
+  const items: T[] = [];
+  let after: string | undefined;
+  const maxPages = opts.maxPages ?? 20;
+  for (let i = 0; i < maxPages; i += 1) {
+    const res = await graphFetch<{
+      data?: T[];
+      paging?: { cursors?: { after?: string }; next?: string };
+    }>({
+      path: opts.path,
+      token: opts.token,
+      appSecret: opts.appSecret,
+      query: { limit: 100, ...opts.query, ...(after ? { after } : {}) },
+    });
+    items.push(...(res.data.data ?? []));
+    after = res.data.paging?.cursors?.after;
+    if (!after || !res.data.paging?.next) break;
+  }
+  return items;
+}
+

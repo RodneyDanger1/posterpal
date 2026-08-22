@@ -12,6 +12,7 @@ import {
   inboxCount,
   latestQuota,
   listComments,
+  listCommentsForPost,
   listContent,
   listLogs,
   listMerch,
@@ -113,8 +114,17 @@ export async function bootstrapApp(userId: string) {
   }
   try {
     await tickScheduler(userId);
-  } catch {
-    /* scheduler must not break the shell */
+  } catch (e) {
+    try {
+      await recordLog({
+        userId,
+        status: "scheduler_tick_failed",
+        error: e instanceof Error ? e.message : String(e),
+        path: "bootstrap",
+      });
+    } catch {
+      /* log must not break the shell */
+    }
   }
   return {
     pages,
@@ -181,8 +191,16 @@ export async function savePrefs(
   if (data.defaultPageId !== undefined) {
     await setSetting(userId, "default_page_id", data.defaultPageId, false);
   }
-  if (data.cadenceWarn !== undefined) await setSetting(userId, "cadence_warn", String(data.cadenceWarn), false);
-  if (data.cadenceBlock !== undefined) await setSetting(userId, "cadence_block", String(data.cadenceBlock), false);
+  if (data.cadenceWarn !== undefined) {
+    const warn = Math.max(1, Number(data.cadenceWarn) || 8);
+    await setSetting(userId, "cadence_warn", String(warn), false);
+    data = { ...data, cadenceWarn: warn };
+  }
+  if (data.cadenceBlock !== undefined) {
+    const block = Math.max(1, Number(data.cadenceBlock) || 20);
+    await setSetting(userId, "cadence_block", String(block), false);
+    data = { ...data, cadenceBlock: block };
+  }
   if (data.cadenceWarn !== undefined || data.cadenceBlock !== undefined) {
     const sql = await getSql();
     await sql`
@@ -261,7 +279,8 @@ export async function getPostBundle(userId: string, postId: string) {
   const post = await getPost(userId, postId);
   if (!post) return null;
   const media = await listContent(userId, postId);
-  return { post, media };
+  const comments = await listCommentsForPost(userId, postId);
+  return { post, media, comments };
 }
 
 export const cadence = cadenceForPage;
@@ -282,7 +301,79 @@ export async function policy(
 }
 
 export async function compose(userId: string, data: ComposerInput) {
-  return saveAndDispatch(userId, data);
+  const extraIds = (data.alsoPageIds ?? []).filter((id) => id && id !== data.pageId);
+  const { alsoPageIds: _ignored, ...primaryInput } = data;
+  const primary = await saveAndDispatch(userId, primaryInput);
+  const extras: Array<{ id: string; status: string; pageId: string; warning: string | null }> = [];
+  const failures: string[] = [];
+  for (const pageId of extraIds) {
+    const page = await getPage(userId, pageId);
+    try {
+      const result = await saveAndDispatch(userId, { ...primaryInput, pageId });
+      extras.push({ id: result.id, status: result.status, pageId, warning: result.warning });
+    } catch (e) {
+      failures.push(`${page?.name ?? pageId}: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+  const extraNote = extras.length
+    ? ` Also ${primaryInput.mode === "local-draft" ? "saved" : "queued"} on ${extras.length} other Page${extras.length === 1 ? "" : "s"}.`
+    : "";
+  const failNote = failures.length ? ` Extra Pages failed — ${failures.join("; ")}` : "";
+  const warning = `${primary.warning ?? ""}${extraNote}${failNote}`.trim() || null;
+  return { ...primary, extraCount: extras.length, extraIds: extras.map((e) => e.id), warning };
+}
+
+export async function clonePost(
+  userId: string,
+  data: {
+    postId: string;
+    pageIds: string[];
+    mode?: "local-draft" | "schedule";
+    scheduledAt?: string | null;
+  },
+) {
+  const post = await getPost(userId, data.postId);
+  if (!post) throw new Error("Post not found");
+  const media = await listContent(userId, data.postId);
+  const pageIds = [...new Set(data.pageIds.filter(Boolean))];
+  if (pageIds.length === 0) throw new Error("Pick at least one Page to clone onto.");
+  const results: Array<{ id: string; status: string; pageId: string }> = [];
+  const failures: string[] = [];
+  for (const pageId of pageIds) {
+    const page = await getPage(userId, pageId);
+    try {
+      const result = await saveAndDispatch(userId, {
+        pageId,
+        message: post.message ?? "",
+        link: post.link,
+        firstComment: post.first_comment,
+        mediaType: post.media_type,
+        mode: data.mode ?? "local-draft",
+        scheduledAt: data.scheduledAt ?? null,
+        media: media.map((m) => ({
+          fileName: m.file_name,
+          mimeType: m.mime_type ?? undefined,
+          dataUrl: m.data_url ?? undefined,
+          width: m.width ?? undefined,
+          height: m.height ?? undefined,
+          durationMs: m.duration_ms ?? undefined,
+          altText: m.alt_text ?? undefined,
+          createdWithAi: m.created_with_ai,
+        })),
+      });
+      results.push({ id: result.id, status: result.status, pageId });
+    } catch (e) {
+      failures.push(`${page?.name ?? pageId}: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+  if (results.length === 0) {
+    throw new Error(failures[0] ?? "Could not clone this post.");
+  }
+  return {
+    cloned: results.length,
+    results,
+    warning: failures.length ? failures.join("; ") : null,
+  };
 }
 
 export async function publishNow(userId: string, postId: string) {
@@ -427,8 +518,12 @@ export async function cancelPost(userId: string, postId: string) {
 }
 
 export async function comments(userId: string, filter: "needs" | "hidden" | "all", pageId?: string) {
-  const id = await resolvePageId(userId, pageId);
-  return listComments(userId, filter, id);
+  if (pageId) {
+    const page = await getPage(userId, pageId);
+    if (!page) return [];
+    return listComments(userId, filter, page.id);
+  }
+  return listComments(userId, filter);
 }
 
 export async function hideComment(userId: string, data: { commentId: string; hidden: boolean }) {
@@ -621,7 +716,7 @@ export async function mediaLibrary(userId: string, pageId?: string): Promise<Med
   const id = await resolvePageId(userId, pageId);
   const rows = id
     ? await sql<MediaLibraryItem>`
-        select ci.id, ci.file_name, ci.media_kind, ci.alt_text, ci.data_url, pa.name as page_name, ci.mime_type
+        select ci.id, ci.file_name, ci.media_kind, ci.alt_text, ci.data_url, pa.name as page_name, ci.mime_type, ci.created_with_ai
         from content_items ci
         join posts po on po.id = ci.post_id
         join pages pa on pa.id = po.page_id
@@ -630,7 +725,7 @@ export async function mediaLibrary(userId: string, pageId?: string): Promise<Med
         limit 80
       `
     : await sql<MediaLibraryItem>`
-        select ci.id, ci.file_name, ci.media_kind, ci.alt_text, ci.data_url, pa.name as page_name, ci.mime_type
+        select ci.id, ci.file_name, ci.media_kind, ci.alt_text, ci.data_url, pa.name as page_name, ci.mime_type, ci.created_with_ai
         from content_items ci
         join posts po on po.id = ci.post_id
         join pages pa on pa.id = po.page_id
@@ -638,7 +733,14 @@ export async function mediaLibrary(userId: string, pageId?: string): Promise<Med
         order by ci.created_at desc
         limit 80
       `;
-  return rows;
+  return rows.map((r) => ({
+    ...r,
+    created_with_ai:
+      r.created_with_ai === true ||
+      (r as { created_with_ai?: unknown }).created_with_ai === "t" ||
+      (r as { created_with_ai?: unknown }).created_with_ai === 1 ||
+      (r as { created_with_ai?: unknown }).created_with_ai === "1",
+  }));
 }
 
 export async function generateVariants(
@@ -740,7 +842,17 @@ export async function tick(userId: string) {
   } catch {
     /* keep ticking */
   }
-  const ran = await tickScheduler(userId);
+  let ran = 0;
+  try {
+    ran = await tickScheduler(userId);
+  } catch (e) {
+    await recordLog({
+      userId,
+      status: "scheduler_tick_failed",
+      error: e instanceof Error ? e.message : String(e),
+      path: "tick",
+    });
+  }
   const last = await getSetting(userId, "last_graph_sync");
   const stale = !last || Date.now() - new Date(last).getTime() > 120_000;
   let sync: SyncResult | null = null;
@@ -831,22 +943,43 @@ export const pairDevice = redeemPairingCode;
 
 export async function runAgent(
   userId: string,
-  data: { pageId: string; prompt: string; provider?: string },
+  data: { pageId: string; prompt: string; provider?: string; mapPage?: boolean },
 ) {
   const { runDeskAgent } = await import("./agent");
   return runDeskAgent(userId, data);
 }
 
+export async function pageResearchProfile(userId: string, pageId: string) {
+  const { loadPageProfile } = await import("./agent");
+  return loadPageProfile(userId, pageId);
+}
+
 export async function listAgentRuns(userId: string, pageId?: string) {
   const sql = await getSql();
   const rows = pageId
-    ? await sql<{ id: string; prompt: string; summary: string | null; created_at: string }>`
-        select id, prompt, summary, created_at from agent_runs
+    ? await sql<{
+        id: string;
+        prompt: string;
+        summary: string | null;
+        drafts_json: string | null;
+        sources_json: string | null;
+        image_prompt: string | null;
+        created_at: string;
+      }>`
+        select id, prompt, summary, drafts_json, sources_json, image_prompt, created_at from agent_runs
         where user_id = ${userId} and page_id = ${pageId}
         order by created_at desc limit 12
       `
-    : await sql<{ id: string; prompt: string; summary: string | null; created_at: string }>`
-        select id, prompt, summary, created_at from agent_runs
+    : await sql<{
+        id: string;
+        prompt: string;
+        summary: string | null;
+        drafts_json: string | null;
+        sources_json: string | null;
+        image_prompt: string | null;
+        created_at: string;
+      }>`
+        select id, prompt, summary, drafts_json, sources_json, image_prompt, created_at from agent_runs
         where user_id = ${userId}
         order by created_at desc limit 12
       `;

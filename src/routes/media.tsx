@@ -142,7 +142,7 @@ function Media() {
                             mimeType: mime,
                             dataUrl: String(r.data_url),
                             altText: String(r.alt_text ?? ""),
-                            createdWithAi: false,
+                            createdWithAi: Boolean(r.created_with_ai),
                           },
                         ],
                       });

@@ -3,7 +3,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import type { PageRow } from "@/lib/posterpal/types";
 import { nextGoodSlot } from "@/lib/posterpal/desk";
-import { useShellStore } from "@/lib/store";
+import { useInspectorStore, useShellStore } from "@/lib/store";
 
 type SearchResult = {
   pages: { id: string; name: string }[];
@@ -22,6 +22,7 @@ export function CommandPalette({
   const setOpen = useShellStore((s) => s.setCommandOpen);
   const setPage = useShellStore((s) => s.setSelectedPageId);
   const setPrefill = useShellStore((s) => s.setComposerPrefill);
+  const openInspector = useInspectorStore((s) => s.open);
   const navigate = useNavigate();
   const [q, setQ] = useState("");
   const [hits, setHits] = useState<SearchResult | null>(null);
@@ -120,8 +121,8 @@ export function CommandPalette({
                   key={p.id}
                   value={`post ${p.message ?? ""}`}
                   onSelect={() => {
-                    setPrefill({ message: p.message ?? "", mediaType: "Text" });
-                    go("/composer");
+                    openInspector(p.id);
+                    setOpen(false);
                   }}
                   className="flex cursor-pointer items-center rounded-md px-3 py-2 text-sm aria-selected:bg-muted"
                 >

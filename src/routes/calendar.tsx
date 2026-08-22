@@ -12,7 +12,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Hint } from "@/components/ui/tooltip";
 import { calendarFn, rescheduleFn } from "@/lib/posterpal/fns";
 import { nextEmptyDay, toLocalInput } from "@/lib/posterpal/operator";
-import { useShellStore } from "@/lib/store";
+import { useInspectorStore, useShellStore } from "@/lib/store";
 import { cn, copyText } from "@/lib/utils";
 
 export const Route = createFileRoute("/calendar")({ component: () => <Guard><CalendarView /></Guard> });
@@ -49,6 +49,7 @@ function canDrag(status: string) {
 function CalendarView() {
   const pageId = useShellStore((s) => s.selectedPageId) ?? undefined;
   const setPrefill = useShellStore((s) => s.setComposerPrefill);
+  const openInspector = useInspectorStore((s) => s.open);
   const navigate = useNavigate();
   const [posts, setPosts] = useState<CalPost[]>([]);
   const [cursor, setCursor] = useState(new Date());
@@ -95,14 +96,15 @@ function CalendarView() {
     void navigate({ to: "/composer" });
   };
 
-  const dropOn = (day: Date) => {
-    if (!dragId) return;
+  const dropOn = (day: Date, postId?: string | null) => {
+    const id = postId || dragId;
+    if (!id) return;
     const iso = new Date(day);
     iso.setHours(10, 0, 0, 0);
     if (iso.getTime() < Date.now() + 10 * 60 * 1000) {
       iso.setTime(Date.now() + 15 * 60 * 1000);
     }
-    setPick({ postId: dragId, when: toLocalInput(iso) });
+    setPick({ postId: id, when: toLocalInput(iso) });
     setDragId(null);
   };
 
@@ -181,7 +183,10 @@ function CalendarView() {
                 <div
                   key={day.toISOString()}
                   onDragOver={(e) => e.preventDefault()}
-                  onDrop={() => dropOn(day)}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    dropOn(day, e.dataTransfer.getData("text/plain") || dragId);
+                  }}
                   onDoubleClick={() => {
                     if (items.length === 0) composeOn(day);
                   }}
@@ -223,10 +228,15 @@ function CalendarView() {
                       <div
                         key={p.id}
                         draggable={canDrag(p.status)}
-                        onDragStart={() => {
-                          if (canDrag(p.status)) setDragId(p.id);
+                        onDragStart={(e) => {
+                          if (!canDrag(p.status)) return;
+                          e.dataTransfer.setData("text/plain", p.id);
+                          e.dataTransfer.effectAllowed = "move";
+                          setDragId(p.id);
                         }}
-                        title={`${p.status} · ${p.media_type} · ${format(whenOf(p), "h:mm a")}`}
+                        onDragEnd={() => setDragId(null)}
+                        onClick={() => openInspector(p.id)}
+                        title={`${p.status} · ${p.media_type} · ${format(whenOf(p), "h:mm a")} — click to inspect`}
                         className="cursor-grab rounded-md bg-chip px-1.5 py-1 text-[11px] leading-tight"
                       >
                         <div className="flex items-center justify-between gap-1">

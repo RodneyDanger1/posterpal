@@ -141,7 +141,9 @@ function Settings() {
           <div className="flex flex-wrap gap-2">
             <Button
               onClick={() => {
-                void saveFacebookApp({ data: { appId, appSecret } }).then(() => toast.success("Saved encrypted"));
+                void saveFacebookApp({ data: { appId, appSecret } })
+                  .then(() => toast.success("Saved encrypted"))
+                  .catch((e: unknown) => toast.error(e instanceof Error ? e.message : "Save failed"));
               }}
             >
               Save credentials
@@ -251,7 +253,14 @@ function Settings() {
             <Input type="number" value={block} onChange={(e) => setBlock(Number(e.target.value))} />
           </div>
         </div>
-        <Button className="mt-3" onClick={() => void savePrefs({ data: { cadenceWarn: warn, cadenceBlock: block } }).then(() => toast.success("Cadence saved"))}>
+        <Button
+          className="mt-3"
+          onClick={() =>
+            void savePrefs({ data: { cadenceWarn: warn, cadenceBlock: block } })
+              .then(() => toast.success("Cadence saved"))
+              .catch((e: unknown) => toast.error(e instanceof Error ? e.message : "Save failed"))
+          }
+        >
           Save cadence
         </Button>
       </section>
@@ -268,7 +277,9 @@ function Settings() {
           disabled={!pageId}
           onClick={() => {
             if (!pageId) return;
-            void updatePageVoiceFn({ data: { pageId, brandVoice: voice } }).then(() => toast.success("Voice saved"));
+            void updatePageVoiceFn({ data: { pageId, brandVoice: voice } })
+              .then(() => toast.success("Voice saved"))
+              .catch((e: unknown) => toast.error(e instanceof Error ? e.message : "Save failed"));
           }}
         >
           Save voice
@@ -360,7 +371,7 @@ function Settings() {
               setDeepseek("");
               setFal("");
               void getSettingsFn().then(setSettings);
-            });
+            }).catch((e: unknown) => toast.error(e instanceof Error ? e.message : "Save failed"));
           }}
         >
           Save AI keys
@@ -379,7 +390,18 @@ function Settings() {
       <section className="rounded-xl bg-card p-4 shadow-card">
         <h2 className="font-semibold">Practice workspace</h2>
         <p className="mt-1 text-[13px] text-muted-foreground">Seed two local Pages with drafts, comments, and merch if this account is empty.</p>
-        <Button className="mt-3" variant="outline" onClick={() => void startPractice().then(() => toast.success("Practice Pages ready"))}>
+        <Button
+          className="mt-3"
+          variant="outline"
+          onClick={() =>
+            void startPractice()
+              .then(() => {
+                toast.success("Practice Pages ready if this desk was empty.");
+                window.location.reload();
+              })
+              .catch((e: unknown) => toast.error(e instanceof Error ? e.message : "Seed failed"))
+          }
+        >
           Seed practice Pages
         </Button>
       </section>

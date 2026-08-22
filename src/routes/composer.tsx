@@ -25,13 +25,15 @@ import {
   imaginePhotoFn,
   runAgentFn,
   analyzeFn,
+  listPostsFn,
 } from "@/lib/posterpal/fns";
-import { applyUtm, captionHint, captionStats, countHashtags, hasCallToAction, isQuietHour, suggestedIndustrySlot, trimHashtags } from "@/lib/posterpal/operator";
+import { applyUtm, captionHint, captionStats, countHashtags, formatSlotLabel, hasCallToAction, hourHeatmap, isQuietHour, nextDatetimeLocal, publishToast, suggestedIndustrySlot, topSlots, trimHashtags, type HeatCell } from "@/lib/posterpal/operator";
 import { IMAGE_PROVIDERS, TEXT_PROVIDERS } from "@/lib/posterpal/providers";
 import type { CadenceResult, MediaLibraryItem, MerchRow, PageRow, PolicyResult, SettingsBag, SnippetRow } from "@/lib/posterpal/types";
 import { useShellStore } from "@/lib/store";
 import { validateReel } from "@/lib/posterpal/policy";
 import { copyText } from "@/lib/utils";
+import { FacebookPreview } from "@/components/facebook-preview";
 
 export const Route = createFileRoute("/composer")({ component: ComposerPage });
 
@@ -85,6 +87,8 @@ function useComposerState() {
   const [variantLabel, setVariantLabel] = useState<string | null>(null);
   const [variantGroupId, setVariantGroupId] = useState<string | null>(null);
   const [settings, setSettings] = useState<SettingsBag | null>(null);
+  const [alsoPageIds, setAlsoPageIds] = useState<string[]>([]);
+  const [bestSlots, setBestSlots] = useState<HeatCell[]>([]);
 
   useEffect(() => {
     void bootstrapApp().then((snap) => setPages(snap.pages));
@@ -118,6 +122,7 @@ function useComposerState() {
       setMode("schedule");
     }
     if (prefill.link) setLink(prefill.link);
+    if (prefill.imagePrompt) setImagePrompt(prefill.imagePrompt);
     setPrefill(null);
   }, [prefill, setPrefill, setPageId]);
 
@@ -131,6 +136,10 @@ function useComposerState() {
     void mediaLibraryFn({ data: { pageId: selected.id } })
       .then(setLibrary)
       .catch(() => setLibrary([]));
+    void listPostsFn({ data: { pageId: selected.id, status: "Published", limit: 50 } })
+      .then((posts) => setBestSlots(topSlots(hourHeatmap(posts), 3)))
+      .catch(() => setBestSlots([]));
+    setAlsoPageIds((ids) => ids.filter((id) => id !== selected.id));
   }, [selected?.id]);
 
   useEffect(() => {
@@ -194,6 +203,9 @@ function useComposerState() {
     variantGroupId,
     setVariantGroupId,
     settings,
+    alsoPageIds,
+    setAlsoPageIds,
+    bestSlots,
   };
 }
 
@@ -205,7 +217,11 @@ function Composer() {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (s.busy) return;
+      const el = e.target as HTMLElement | null;
+      const inField = Boolean(el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable));
       if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+        if (inField && el?.tagName !== "TEXTAREA") return;
         e.preventDefault();
         void submit(s, s.mode);
       }
@@ -214,8 +230,7 @@ function Composer() {
         void submit(s, "local-draft");
       }
       if (e.key === "Escape") {
-        const el = e.target as HTMLElement | null;
-        if (el && (el.tagName === "TEXTAREA" || el.tagName === "INPUT" || el.isContentEditable)) return;
+        if (inField) return;
         s.setMessage("");
         s.setMedia([]);
       }
@@ -233,28 +248,56 @@ function Composer() {
   }
 
   return (
-    <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
-      <div className="mx-auto w-full max-w-3xl space-y-4 xl:mx-0">
+    <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(280px,360px)]">
+      <div className="mx-auto w-full max-w-3xl space-y-4 lg:mx-0">
       <PageHeader
         title="Composer"
         hint={`${s.selected.name}${s.selected.is_read_only ? " · analyze-only" : ""}. Ctrl+Enter sends the selected mode. Ctrl+S saves a local draft. Esc clears. Publish now hits Graph immediately. Schedule uses Facebook if the time is 10 minutes–30 days out; otherwise the local scheduler keeps it. Local draft never leaves this machine. Facebook draft is unpublished (published=false, no time) per the Pages API.`}
       />
       {s.pages.length > 1 ? (
-        <label className="flex flex-wrap items-center gap-2 text-[13px]">
-          <span className="text-muted-foreground">Posting as</span>
-          <select
-            value={s.selected.id}
-            onChange={(e) => s.setPageId(e.target.value)}
-            className="rounded-md border border-input bg-background px-2 py-1.5 text-sm"
-          >
-            {s.pages.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name}
-                {p.is_practice ? " (practice)" : ""}
-              </option>
-            ))}
-          </select>
-        </label>
+        <div className="space-y-2">
+          <label className="flex flex-wrap items-center gap-2 text-[13px]">
+            <span className="text-muted-foreground">Posting as</span>
+            <select
+              value={s.selected.id}
+              onChange={(e) => s.setPageId(e.target.value)}
+              className="rounded-md border border-input bg-background px-2 py-1.5 text-sm"
+            >
+              {s.pages.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                  {p.is_practice ? " (practice)" : ""}
+                </option>
+              ))}
+            </select>
+          </label>
+          <div>
+            <div className="text-[13px] font-medium">Also post to</div>
+            <p className="text-[12px] text-muted-foreground">
+              Same caption and media, a separate row per Page. Each Page still has its own cadence and policy. You click Send once.
+            </p>
+            <div className="mt-2 flex flex-wrap gap-2">
+              {s.pages
+                .filter((p) => p.id !== s.selected.id)
+                .map((p) => {
+                  const on = s.alsoPageIds.includes(p.id);
+                  return (
+                    <label key={p.id} className="flex items-center gap-2 rounded-md border border-border px-2 py-1 text-[13px]">
+                      <input
+                        type="checkbox"
+                        checked={on}
+                        onChange={() =>
+                          s.setAlsoPageIds((cur) => (on ? cur.filter((id) => id !== p.id) : [...cur, p.id]))
+                        }
+                      />
+                      {p.name}
+                      {p.is_practice ? " (practice)" : ""}
+                    </label>
+                  );
+                })}
+            </div>
+          </div>
+        </div>
       ) : null}
 
       {s.cadence?.level !== "ok" && s.cadence ? (
@@ -290,7 +333,11 @@ function Composer() {
                 <Button
                   size="sm"
                   variant={s.mediaType === k ? "default" : "outline"}
-                  onClick={() => s.setMediaType(k)}
+                  onClick={() => {
+                    s.setMediaType(k);
+                    if (k === "Text") s.setMedia([]);
+                    else if (k !== "Carousel" && s.media.length > 1) s.setMedia(s.media.slice(0, 1));
+                  }}
                 >
                   {k}
                 </Button>
@@ -309,6 +356,29 @@ function Composer() {
             </span>
             <span>{captionHint(stats.level)}</span>
           </div>
+          {s.bestSlots.length > 0 ? (
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-[12px] text-muted-foreground">Best hours on this Page</span>
+              {s.bestSlots.map((slot) => (
+                <Hint
+                  key={`${slot.day}-${slot.hour}`}
+                  label={`${slot.n} published post${slot.n === 1 ? "" : "s"} · ${Math.round(slot.score / Math.max(1, slot.n))} avg engagement. Sets Schedule to the next ${formatSlotLabel(slot.day, slot.hour)}.`}
+                >
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    type="button"
+                    onClick={() => {
+                      s.setMode("schedule");
+                      s.setWhen(nextDatetimeLocal(slot.day, slot.hour));
+                    }}
+                  >
+                    {formatSlotLabel(slot.day, slot.hour)}
+                  </Button>
+                </Hint>
+              ))}
+            </div>
+          ) : null}
           {s.message.trim() && !hasCallToAction(s.message) ? (
             <p className="text-[12px] text-muted-foreground">No question or CTA yet. Optional.</p>
           ) : null}
@@ -387,13 +457,13 @@ function Composer() {
                   title={`Reuse ${String(r.file_name)}`}
                   onClick={() => {
                     s.setMedia([
-                      ...s.media,
+                      ...(s.mediaType === "Carousel" ? s.media : []),
                       {
                         fileName: String(r.file_name),
                         mimeType: String(r.mime_type ?? "image/jpeg"),
                         dataUrl: String(r.data_url),
                         altText: String(r.alt_text ?? ""),
-                        createdWithAi: false,
+                        createdWithAi: Boolean(r.created_with_ai),
                       },
                     ]);
                     toast.message("Attached from the library. Review alt text.");
@@ -438,7 +508,10 @@ function Composer() {
                   variant={s.mode === m ? "default" : "secondary"}
                   onClick={() => {
                     s.setMode(m);
-                    if (m === "schedule" && !s.when) s.setWhen(suggestedIndustrySlot());
+                    if (m === "schedule" && !s.when) {
+                      const slot = s.bestSlots[0];
+                      s.setWhen(slot ? nextDatetimeLocal(slot.day, slot.hour) : suggestedIndustrySlot());
+                    }
                   }}
                 >
                   {label}
@@ -455,11 +528,29 @@ function Composer() {
                     onChange={(e) => s.setWhen(e.target.value)}
                   />
                 </Hint>
-                <Hint label="Fills the next midweek 1pm local slot — Sprout's 2026 Facebook peak (Tue/Wed 12–8pm). Replace with this Page's own best hour from Analytics once you have history.">
-                  <Button size="sm" variant="outline" type="button" onClick={() => s.setWhen(suggestedIndustrySlot())}>
-                    Suggested hour
-                  </Button>
-                </Hint>
+                {s.bestSlots.length > 0
+                  ? s.bestSlots.map((slot) => (
+                      <Hint
+                        key={`${slot.day}-${slot.hour}`}
+                        label={`${slot.n} published post${slot.n === 1 ? "" : "s"} · ${Math.round(slot.score / Math.max(1, slot.n))} avg engagement on this Page.`}
+                      >
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          type="button"
+                          onClick={() => s.setWhen(nextDatetimeLocal(slot.day, slot.hour))}
+                        >
+                          {formatSlotLabel(slot.day, slot.hour)}
+                        </Button>
+                      </Hint>
+                    ))
+                  : (
+                      <Hint label="Fills the next midweek 1pm local slot — Sprout's 2026 Facebook peak (Tue/Wed 12–8pm). Replace with this Page's own best hour from Analytics once you have history.">
+                        <Button size="sm" variant="outline" type="button" onClick={() => s.setWhen(suggestedIndustrySlot())}>
+                          Suggested hour
+                        </Button>
+                      </Hint>
+                    )}
               </div>
             ) : null}
             {s.mode === "schedule" && s.when && isQuietHour(s.when) ? (
@@ -679,7 +770,18 @@ function Composer() {
         </CardContent>
       </Card>
       </div>
-      <aside className="rounded-xl bg-card p-4 shadow-card xl:sticky xl:top-4">
+      <aside className="order-first space-y-3 lg:order-none lg:sticky lg:top-4">
+        <FacebookPreview
+          page={s.selected}
+          message={s.message}
+          link={s.link}
+          firstComment={s.firstComment}
+          mediaType={s.mediaType}
+          media={s.media}
+          when={s.when}
+          mode={s.mode}
+        />
+        <div className="rounded-xl bg-card p-4 shadow-card">
         <h2 className="text-[13px] font-semibold">Policy checklist</h2>
         {!s.policy ? (
           <p className="mt-2 text-[13px] text-muted-foreground">Flags appear as you write.</p>
@@ -716,6 +818,7 @@ function Composer() {
             </p>
           </section>
         ) : null}
+        </div>
       </aside>
     </div>
   );
@@ -723,6 +826,7 @@ function Composer() {
 
 async function submit(s: ReturnType<typeof useComposerState>, mode: Mode) {
   if (!s.selected) return;
+  if (s.busy) return;
   if (s.policy && !s.policy.canPublish && mode !== "local-draft") {
     toast.error("Policy checklist blocked this publish. Fix the blocking flags or save a local draft.");
     return;
@@ -734,6 +838,10 @@ async function submit(s: ReturnType<typeof useComposerState>, mode: Mode) {
   const needsFile = s.mediaType === "Photo" || s.mediaType === "Carousel" || s.mediaType === "Video" || s.mediaType === "Reel" || s.mediaType === "Story";
   if (needsFile && s.media.length === 0 && mode !== "local-draft") {
     toast.error(`${s.mediaType} needs a file. Drop one, generate a still, or save a local draft.`);
+    return;
+  }
+  if (s.mediaType === "Carousel" && s.media.length < 2 && mode !== "local-draft") {
+    toast.error("Carousel needs at least two images.");
     return;
   }
   if (mode === "schedule" && !s.when) {
@@ -759,12 +867,20 @@ async function submit(s: ReturnType<typeof useComposerState>, mode: Mode) {
         media: s.media,
         variantLabel: s.variantLabel,
         variantGroupId: s.variantGroupId,
+        alsoPageIds: s.alsoPageIds,
       },
     });
-    toast.success(`${result.status}${result.warning ? " — " + result.warning : ""}`);
-    if (mode !== "local-draft") {
+    const outcome = publishToast(result.status, result.warning);
+    const extraFailed = Boolean(result.warning && /Extra Pages failed/i.test(result.warning));
+    if (!outcome.ok) {
+      toast.error(outcome.text);
+      return;
+    }
+    toast[extraFailed ? "message" : "success"](outcome.text);
+    if (mode !== "local-draft" && !extraFailed) {
       s.setMessage("");
       s.setMedia([]);
+      s.setAlsoPageIds([]);
     }
   } catch (e) {
     toast.error(e instanceof Error ? e.message : "Publish failed");
@@ -907,7 +1023,7 @@ async function ingestFiles(
   setMedia: (m: MediaFile[]) => void,
   mediaType: MediaKind,
 ) {
-  const next = [...current];
+  const next = mediaType === "Carousel" ? [...current] : [];
   for (const file of files) {
     if (file.size > 6_000_000) {
       toast.error(`${file.name} is over 6MB. Compress it, or paste a public https URL as the Link for Graph to fetch.`);

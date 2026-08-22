@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { facebookDomainHints } from "@/lib/posterpal/facebook-domains";
 import { copyText } from "@/lib/utils";
@@ -28,7 +29,12 @@ function CopyRow({ label, value, hint }: { label: string; value: string; hint: s
 }
 
 export function FacebookDomainHelp({ origin }: { origin?: string }) {
-  const hints = facebookDomainHints(origin);
+  const [liveOrigin, setLiveOrigin] = useState<string | undefined>(undefined);
+  useEffect(() => {
+    setLiveOrigin(origin ?? window.location.origin);
+  }, [origin]);
+  if (!liveOrigin) return null;
+  const hints = facebookDomainHints(liveOrigin);
   const publishedHost = (import.meta.env.VITE_PUBLIC_HOSTNAME as string | undefined)?.trim() || "";
   const published = Boolean(publishedHost);
   if (hints.isLoopback) {

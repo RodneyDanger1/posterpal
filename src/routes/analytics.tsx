@@ -7,9 +7,9 @@ import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { analyticsFn, exportCsvFn } from "@/lib/posterpal/fns";
-import { bestHourSlot, contentMix, dayLabel, hourHeatmap, shopLinkShare } from "@/lib/posterpal/operator";
+import { bestHourSlot, contentMix, dayLabel, formatSlotLabel, hourHeatmap, nextDatetimeLocal, shopLinkShare, suggestedIndustrySlot } from "@/lib/posterpal/operator";
 import type { AnalyticsPoint } from "@/lib/posterpal/types";
-import { useShellStore } from "@/lib/store";
+import { useInspectorStore, useShellStore } from "@/lib/store";
 import { format } from "date-fns";
 
 export const Route = createFileRoute("/analytics")({ component: () => <Guard><Analytics /></Guard> });
@@ -17,6 +17,7 @@ export const Route = createFileRoute("/analytics")({ component: () => <Guard><An
 function Analytics() {
   const pageId = useShellStore((s) => s.selectedPageId) ?? undefined;
   const setPrefill = useShellStore((s) => s.setComposerPrefill);
+  const openInspector = useInspectorStore((s) => s.open);
   const navigate = useNavigate();
   const [days, setDays] = useState(28);
   const [pack, setPack] = useState<{
@@ -25,11 +26,23 @@ function Analytics() {
     fanCount: number | null;
     days: number;
   } | null>(null);
+  const [loadState, setLoadState] = useState<"loading" | "ok" | "error">("loading");
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
+    setLoadState("loading");
+    setPack(null);
     void analyticsFn({ data: { pageId, days } })
-      .then(setPack)
-      .catch((e: unknown) => toast.error(e instanceof Error ? e.message : "Analytics failed"));
+      .then((next) => {
+        setPack(next);
+        setLoadState("ok");
+      })
+      .catch((e: unknown) => {
+        const msg = e instanceof Error ? e.message : "Analytics failed";
+        setLoadError(msg);
+        setLoadState("error");
+        toast.error(msg);
+      });
   }, [pageId, days]);
 
   const series = useMemo(() => {
@@ -116,7 +129,33 @@ function Analytics() {
             Reuse top caption
           </Button>
         ) : null}
+        {bestCaption?.message ? (
+          <Button
+            size="sm"
+            title="Open Composer with the winning caption scheduled at this Page's hottest hour"
+            onClick={() => {
+              setPrefill({
+                message: bestCaption.message,
+                pageId,
+                mediaType: "Text",
+                when: best ? nextDatetimeLocal(best.day, best.hour) : suggestedIndustrySlot(),
+              });
+              void navigate({ to: "/composer" });
+            }}
+          >
+            Schedule winner
+          </Button>
+        ) : null}
       </PageHeader>
+
+      {loadState === "loading" ? (
+        <p className="text-sm text-muted-foreground">Loading this Page’s last {days} days…</p>
+      ) : null}
+      {loadState === "error" ? (
+        <div className="rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive">
+          {loadError ?? "Analytics failed."} Charts are hidden so you don’t mix this Page with the previous one.
+        </div>
+      ) : null}
 
       {pack?.insightsLocked ? (
         <div className="rounded-lg bg-warning/20 px-3 py-2 text-sm">
@@ -124,6 +163,8 @@ function Analytics() {
         </div>
       ) : null}
 
+      {loadState === "ok" ? (
+      <>
       <div className="grid gap-3 sm:grid-cols-3">
         <Stat label="Reactions" value={totals.reactions} />
         <Stat label="Comments" value={totals.comments} />
@@ -143,7 +184,7 @@ function Analytics() {
             <>
               <p className="mb-3 text-sm text-muted-foreground">
                 {best
-                  ? `Hottest slot: ${dayLabel(best.day)} ${String(best.hour).padStart(2, "0")}:00 · ${Math.round(best.score / Math.max(1, best.n))} avg engagement from ${best.n} post${best.n === 1 ? "" : "s"}.`
+                  ? `Hottest slot: ${dayLabel(best.day)} ${String(best.hour).padStart(2, "0")}:00 · ${Math.round(best.score / Math.max(1, best.n))} avg engagement from ${best.n} post${best.n === 1 ? "" : "s"}. Click a cell to schedule there.`
                   : "No peak yet."}
               </p>
               <div className="overflow-x-auto">
@@ -155,7 +196,16 @@ function Analytics() {
                     </div>
                   ))}
                   {Array.from({ length: 7 }, (_, day) => (
-                    <HeatRow key={day} day={day} heat={heat} max={maxHeat} />
+                    <HeatRow
+                      key={day}
+                      day={day}
+                      heat={heat}
+                      max={maxHeat}
+                      onPick={(d, h) => {
+                        setPrefill({ message: "", pageId, when: nextDatetimeLocal(d, h) });
+                        void navigate({ to: "/composer" });
+                      }}
+                    />
                   ))}
                 </div>
               </div>
@@ -271,11 +321,53 @@ function Analytics() {
           </CardContent>
         </Card>
       ) : null}
+
+      {(pack?.rows ?? []).length > 0 ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>Top posts</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {[...(pack?.rows ?? [])]
+              .sort(
+                (a, b) =>
+                  Number(b.reactions_count ?? 0) + Number(b.comments_count ?? 0) -
+                  (Number(a.reactions_count ?? 0) + Number(a.comments_count ?? 0)),
+              )
+              .slice(0, 8)
+              .map((r) => (
+                <button
+                  key={String(r.id)}
+                  type="button"
+                  className="flex w-full items-start justify-between gap-3 rounded-lg px-2 py-2 text-left hover:bg-muted"
+                  onClick={() => openInspector(String(r.id))}
+                >
+                  <p className="line-clamp-2 text-sm">{String(r.message ?? "(no caption)")}</p>
+                  <span className="shrink-0 text-[12px] text-muted-foreground tabular-nums">
+                    {Number(r.reactions_count ?? 0)} · {Number(r.comments_count ?? 0)}
+                  </span>
+                </button>
+              ))}
+          </CardContent>
+        </Card>
+      ) : null}
+      </>
+      ) : null}
     </div>
   );
 }
 
-function HeatRow({ day, heat, max }: { day: number; heat: ReturnType<typeof hourHeatmap>; max: number }) {
+function HeatRow({
+  day,
+  heat,
+  max,
+  onPick,
+}: {
+  day: number;
+  heat: ReturnType<typeof hourHeatmap>;
+  max: number;
+  onPick: (day: number, hour: number) => void;
+}) {
   return (
     <>
       <div className="pr-1 text-right text-[10px] text-muted-foreground">{dayLabel(day)}</div>
@@ -283,15 +375,17 @@ function HeatRow({ day, heat, max }: { day: number; heat: ReturnType<typeof hour
         const cell = heat.find((c) => c.day === day && c.hour === hour);
         const intensity = cell ? cell.score / Math.max(1, cell.n) / max : 0;
         return (
-          <div
+          <button
             key={hour}
+            type="button"
             title={
               cell
-                ? `${dayLabel(day)} ${hour}:00 · ${cell.n} posts · ${Math.round(cell.score / cell.n)} avg`
-                : `${dayLabel(day)} ${hour}:00 · no posts`
+                ? `${formatSlotLabel(day, hour)} · ${cell.n} posts · ${Math.round(cell.score / cell.n)} avg — click to schedule`
+                : `${formatSlotLabel(day, hour)} · no posts — click to schedule`
             }
             className="h-4 rounded-sm bg-primary"
             style={{ opacity: 0.08 + intensity * 0.92 }}
+            onClick={() => onPick(day, hour)}
           />
         );
       })}

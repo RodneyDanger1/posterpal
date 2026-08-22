@@ -73,6 +73,38 @@ export function bestHourSlot(cells: HeatCell[]): HeatCell | null {
   return [...cells].sort((a, b) => b.score / Math.max(1, b.n) - a.score / Math.max(1, a.n))[0] ?? null;
 }
 
+/** Rank unique day/hour cells by average engagement. Used by Composer best-time chips. */
+export function topSlots(cells: HeatCell[], n = 3): HeatCell[] {
+  const ranked = [...cells]
+    .filter((c) => c.hour >= 7 && c.hour <= 21)
+    .sort((a, b) => b.score / Math.max(1, b.n) - a.score / Math.max(1, a.n));
+  const seen = new Set<string>();
+  const out: HeatCell[] = [];
+  for (const c of ranked) {
+    const key = `${c.day}:${c.hour}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(c);
+    if (out.length >= n) break;
+  }
+  if (out.length >= n) return out;
+  const night = [...cells].sort((a, b) => b.score / Math.max(1, b.n) - a.score / Math.max(1, a.n));
+  for (const c of night) {
+    const key = `${c.day}:${c.hour}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(c);
+    if (out.length >= n) break;
+  }
+  return out;
+}
+
+export function formatSlotLabel(day: number, hour: number): string {
+  const h = hour % 12 || 12;
+  const ampm = hour < 12 ? "am" : "pm";
+  return `${dayLabel(day)} ${h}${ampm}`;
+}
+
 /** Next local datetime-local value for a day/hour, at least 15 minutes from now. */
 export function nextDatetimeLocal(day: number, hour: number, now = new Date()): string {
   const d = new Date(now);
@@ -262,10 +294,17 @@ export function isQuietHour(localDatetime: string): boolean {
   return h >= 23 || h < 6;
 }
 
+/** Classify a compose/publish result so Failed never looks like success. */
+export function publishToast(status: string, warning?: string | null): { ok: boolean; text: string } {
+  const text = warning ? `${status} — ${warning}` : status;
+  return { ok: status !== "Failed", text };
+}
+
 export function toLocalInput(d: Date): string {
   const pad = (n: number) => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
+
 
 export function countHashtags(text: string): number {
   return (text.match(/(^|\s)#[\p{L}\p{N}_]+/gu) ?? []).length;

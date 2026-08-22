@@ -11,7 +11,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { bootstrapApp, startPractice, syncNowFn } from "@/lib/posterpal/fns";
 import { inGoldenHour, isOverdue, monetizationFitness, vaultAlarm } from "@/lib/posterpal/operator";
 import type { HomeSnapshot } from "@/lib/posterpal/types";
-import { useShellStore } from "@/lib/store";
+import { useInspectorStore, useShellStore } from "@/lib/store";
 import { formatFanCount, relativeTime } from "@/lib/utils";
 import { NeedsYou } from "@/components/needs-you";
 
@@ -29,11 +29,14 @@ function PagesHome() {
   const navigate = useNavigate();
   const selectedPageId = useShellStore((s) => s.selectedPageId);
   const setPage = useShellStore((s) => s.setSelectedPageId);
+  const openInspector = useInspectorStore((s) => s.open);
   const [data, setData] = useState<HomeSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
 
   const reload = () => {
+    setLoadError(null);
     return bootstrapApp()
       .then((snap) => {
         setData(snap);
@@ -41,7 +44,11 @@ function PagesHome() {
           void navigate({ to: "/setup" });
         }
       })
-      .catch((e: unknown) => toast.error(e instanceof Error ? e.message : "Load failed"));
+      .catch((e: unknown) => {
+        const msg = e instanceof Error ? e.message : "Load failed";
+        setLoadError(msg);
+        toast.error(msg);
+      });
   };
 
   useEffect(() => {
@@ -54,7 +61,11 @@ function PagesHome() {
           void navigate({ to: "/setup" });
         }
       })
-      .catch((e: unknown) => toast.error(e instanceof Error ? e.message : "Load failed"))
+      .catch((e: unknown) => {
+        const msg = e instanceof Error ? e.message : "Load failed";
+        if (!c) setLoadError(msg);
+        toast.error(msg);
+      })
       .finally(() => {
         if (!c) setLoading(false);
       });
@@ -63,7 +74,32 @@ function PagesHome() {
     };
   }, [navigate]);
 
-  if (loading || !data) {
+  if (loading) {
+    return (
+      <div className="grid gap-4 md:grid-cols-2">
+        <Skeleton className="h-36" />
+        <Skeleton className="h-36" />
+      </div>
+    );
+  }
+
+  if (loadError && !data) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle>Desk failed to load</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <p className="text-sm text-muted-foreground">{loadError}</p>
+          <Button onClick={() => { setLoading(true); void reload().finally(() => setLoading(false)); }}>
+            Retry
+          </Button>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  if (!data) {
     return (
       <div className="grid gap-4 md:grid-cols-2">
         <Skeleton className="h-36" />
@@ -247,7 +283,12 @@ function PagesHome() {
               <p className="text-sm text-muted-foreground">Nothing yet. Open Composer.</p>
             ) : (
               data.recentPosts.map((p) => (
-                <div key={p.id} className="flex items-start justify-between gap-3 border-b border-border pb-3 last:border-0 last:pb-0">
+                <button
+                  key={p.id}
+                  type="button"
+                  onClick={() => openInspector(p.id)}
+                  className="flex w-full items-start justify-between gap-3 border-b border-border pb-3 text-left last:border-0 last:pb-0 hover:bg-muted/40"
+                >
                   <div className="min-w-0">
                     <div className="text-[12px] text-muted-foreground">{p.page_name}</div>
                     <p className="line-clamp-2 text-sm">{p.message || "(no caption)"}</p>
@@ -260,7 +301,7 @@ function PagesHome() {
                     </div>
                   </div>
                   <StatusBadge status={p.status} />
-                </div>
+                </button>
               ))
             )}
           </CardContent>
@@ -274,7 +315,12 @@ function PagesHome() {
               <p className="text-sm text-muted-foreground">No scheduled posts. Local scheduler runs every 60s while the desk is open.</p>
             ) : (
               data.dueSoon.map((p) => (
-                <div key={p.id} className="flex items-start justify-between gap-3">
+                <button
+                  key={p.id}
+                  type="button"
+                  onClick={() => openInspector(p.id)}
+                  className="flex w-full items-start justify-between gap-3 text-left hover:bg-muted/40"
+                >
                   <div className="min-w-0">
                     <div className="text-[12px] text-muted-foreground">{p.page_name}</div>
                     <p className="line-clamp-2 text-sm">{p.message}</p>
@@ -284,7 +330,7 @@ function PagesHome() {
                     </div>
                   </div>
                   <StatusBadge status={p.status} />
-                </div>
+                </button>
               ))
             )}
             <Button variant="outline" size="sm" asChild>

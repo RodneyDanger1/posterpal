@@ -34,6 +34,9 @@ import { Skeleton } from "./ui/skeleton";
 import { Hint } from "./ui/tooltip";
 import { CommandPalette } from "./command-palette";
 import { MobileNav } from "./mobile-nav";
+import { NeedsBell } from "./needs-bell";
+import { PostInspector } from "./post-inspector";
+import { ShortcutHelp } from "./shortcut-help";
 
 const NAV = [
   { to: "/", label: "Pages", icon: LayoutGrid, hint: "All Pages you administer. Switch here; Composer, Calendar, and Inbox follow the selected Page." },
@@ -71,7 +74,9 @@ export function AppShell({ children, right }: { children: React.ReactNode; right
       })
       .catch((e: unknown) => toast.error(e instanceof Error ? e.message : "Could not load workspace"));
     const t = window.setInterval(() => {
-      void tickFn().catch(() => undefined);
+      void tickFn().catch((e: unknown) => {
+        toast.error(e instanceof Error ? e.message : "Local scheduler stalled. Due posts are in Needs you.");
+      });
     }, 60_000);
     return () => {
       cancelled = true;
@@ -253,6 +258,20 @@ export function AppShell({ children, right }: { children: React.ReactNode; right
             </Button>
           </Hint>
           <div className="ml-auto flex items-center gap-2">
+            <NeedsBell items={data?.needs ?? []} onChange={() => void bootstrapApp().then(setData)} />
+            <Hint label="Keyboard shortcuts (?)">
+              <Button
+                variant="ghost"
+                size="icon"
+                aria-label="Keyboard shortcuts"
+                onClick={() => {
+                  window.dispatchEvent(new Event("posterpal:shortcuts"));
+                }}
+                className="hidden sm:inline-flex"
+              >
+                <span className="text-[13px] font-semibold">?</span>
+              </Button>
+            </Hint>
             <Hint label={theme === "dark" ? "Light theme" : "Dark theme"}>
               <Button
                 variant="ghost"
@@ -283,6 +302,8 @@ export function AppShell({ children, right }: { children: React.ReactNode; right
 
       <CommandPalette pages={pages} onSearch={(q) => searchFn({ data: { q } })} />
       <MobileNav inboxCount={data?.inboxCount ?? 0} />
+      <PostInspector />
+      <ShortcutHelp />
     </div>
   );
 }

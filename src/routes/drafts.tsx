@@ -7,16 +7,17 @@ import { StatusBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cancelPostFn, getPostBundle, listPostsFn, publishNowFn } from "@/lib/posterpal/fns";
-import { isOverdue, toLocalInput } from "@/lib/posterpal/operator";
+import { isOverdue, publishToast, toLocalInput } from "@/lib/posterpal/operator";
 import type { PostRow } from "@/lib/posterpal/types";
 import { relativeTime, copyText } from "@/lib/utils";
-import { useShellStore } from "@/lib/store";
+import { useInspectorStore, useShellStore } from "@/lib/store";
 
 export const Route = createFileRoute("/drafts")({ component: () => <Guard><Drafts /></Guard> });
 
 function Drafts() {
   const pageId = useShellStore((s) => s.selectedPageId) ?? undefined;
   const setPrefill = useShellStore((s) => s.setComposerPrefill);
+  const openInspector = useInspectorStore((s) => s.open);
   const navigate = useNavigate();
   const [posts, setPosts] = useState<PostRow[]>([]);
   const load = () => {
@@ -57,7 +58,11 @@ function Drafts() {
             ) : (
               groups[key].map((p) => (
                 <article key={p.id} className="rounded-xl bg-card p-4 shadow-card">
-                  <div className="flex flex-wrap items-start justify-between gap-2">
+                  <button
+                    type="button"
+                    className="flex w-full flex-wrap items-start justify-between gap-2 text-left"
+                    onClick={() => openInspector(p.id)}
+                  >
                     <div>
                       <div className="text-[12px] text-muted-foreground">
                         {p.page_name} · {p.media_type} · {relativeTime(p.scheduled_publish_time ?? p.created_at)}
@@ -69,7 +74,7 @@ function Drafts() {
                       {p.error_message ? <p className="mt-2 text-[13px] text-destructive">{p.error_message}</p> : null}
                     </div>
                     <StatusBadge status={p.status} />
-                  </div>
+                  </button>
                   <div className="mt-3 flex flex-wrap gap-2">
                     {p.status === "Failed" || p.status === "LocalDraft" || p.status === "FacebookDraft" ? (
                       <Button
@@ -77,7 +82,8 @@ function Drafts() {
                         onClick={() => {
                           void publishNowFn({ data: { postId: p.id } })
                             .then((r) => {
-                              toast.success(`${r.status}${r.warning ? " — " + r.warning : ""}`);
+                              const outcome = publishToast(r.status, r.warning);
+                              toast[outcome.ok ? "success" : "error"](outcome.text);
                               load();
                             })
                             .catch((e: unknown) => toast.error(e instanceof Error ? e.message : "Failed"));

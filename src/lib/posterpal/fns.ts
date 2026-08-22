@@ -132,8 +132,7 @@ export const composeFn = createServerFn({ method: "POST" })
   .validator((d: ComposerInput) => d)
   .handler(async ({ context, data }) => {
     const ops = await import("./ops");
-    const pageId = (await livePage(context.userId, data.pageId)) ?? data.pageId;
-    return ops.compose(context.userId, { ...data, pageId });
+    return ops.compose(context.userId, data);
   });
 
 export const publishNowFn = createServerFn({ method: "POST" })
@@ -148,8 +147,8 @@ export const rescheduleFn = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
   .validator((d: { postId: string; scheduledAt: string }) => d)
   .handler(async ({ context, data }) => {
-    const { rescheduleExisting } = await import("./reschedule");
-    return rescheduleExisting(context.userId, data.postId, data.scheduledAt);
+    const ops = await import("./ops");
+    return ops.reschedule(context.userId, data);
   });
 
 export const cancelPostFn = createServerFn({ method: "POST" })
@@ -425,10 +424,18 @@ export const revokeDeviceFn = createServerFn({ method: "POST" })
 
 export const runAgentFn = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
-  .validator((d: { pageId: string; prompt: string; provider?: string }) => d)
+  .validator((d: { pageId: string; prompt: string; provider?: string; mapPage?: boolean }) => d)
   .handler(async ({ context, data }) => {
     const ops = await import("./ops");
     return ops.runAgent(context.userId, data);
+  });
+
+export const pageProfileFn = createServerFn({ method: "GET" })
+  .middleware([authMiddleware])
+  .validator((d: { pageId: string }) => d)
+  .handler(async ({ context, data }) => {
+    const ops = await import("./ops");
+    return ops.pageResearchProfile(context.userId, data.pageId);
   });
 
 export const listAgentRunsFn = createServerFn({ method: "GET" })
@@ -452,4 +459,19 @@ export const importFacebookTokenFn = createServerFn({ method: "POST" })
   .handler(async ({ context, data }) => {
     const ops = await import("./ops");
     return ops.importPastedToken(context.userId, data.token);
+  });
+
+export const clonePostFn = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator(
+    (d: {
+      postId: string;
+      pageIds: string[];
+      mode?: "local-draft" | "schedule";
+      scheduledAt?: string | null;
+    }) => d,
+  )
+  .handler(async ({ context, data }) => {
+    const ops = await import("./ops");
+    return ops.clonePost(context.userId, data);
   });

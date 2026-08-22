@@ -130,10 +130,21 @@ async function syncOnePage(
     const comments = Number(gp.comments?.summary?.total_count ?? 0);
     const shares = Number(gp.shares?.count ?? 0);
     const score = reactions + comments * 2 + shares * 3;
-    const existing = await sql<{ id: string }>`
-      select id from posts where user_id = ${userId} and facebook_post_id = ${gp.id} limit 1
+    const altId = gp.id.includes("_") ? gp.id.split("_").pop() ?? null : null;
+    const existing = await sql<{
+      id: string;
+      status: string;
+      first_comment: string | null;
+      created_by_this_app: boolean | string | number;
+    }>`
+      select id, status, first_comment, created_by_this_app from posts
+      where user_id = ${userId}
+        and (facebook_post_id = ${gp.id} or (${altId}::text is not null and facebook_post_id = ${altId}))
+      limit 1
     `;
     let postId = existing[0]?.id;
+    const wasScheduled =
+      existing[0]?.status === "FacebookScheduled" || existing[0]?.status === "LocalScheduled";
     if (postId) {
       await sql`
         update posts set
@@ -144,7 +155,7 @@ async function syncOnePage(
           engagement_score = ${score},
           last_insights_at = now(),
           published_time = coalesce(published_time, ${gp.created_time ?? null}),
-          status = case when status in ('LocalDraft','Failed','Publishing') then 'Published' else status end,
+          status = case when status in ('LocalDraft','Failed','Publishing','FacebookScheduled','LocalScheduled') then 'Published' else status end,
           updated_at = now()
         where id = ${postId} and user_id = ${userId}
       `;
@@ -163,6 +174,33 @@ async function syncOnePage(
       `;
     }
     result.postsUpdated += 1;
+
+    const pendingComment = existing[0]?.first_comment?.trim();
+    const fromThisApp =
+      existing[0]?.created_by_this_app === true ||
+      existing[0]?.created_by_this_app === "t" ||
+      existing[0]?.created_by_this_app === 1 ||
+      existing[0]?.created_by_this_app === "1";
+    if (wasScheduled && fromThisApp && pendingComment && gp.id) {
+      try {
+        await graphFetch({
+          path: `/${gp.id}/comments`,
+          method: "POST",
+          token,
+          appSecret,
+          form: { message: pendingComment },
+        });
+        await recordLog({ userId, postId, status: "first_comment_posted", path: `/${gp.id}/comments` });
+      } catch (e) {
+        await recordLog({
+          userId,
+          postId,
+          status: "first_comment_failed",
+          error: e instanceof Error ? e.message : String(e),
+          path: "first_comment",
+        });
+      }
+    }
 
     for (const c of gp.comments?.data ?? []) {
       const n = await upsertComment(userId, postId, fbPageId, c);
@@ -216,10 +254,8 @@ async function syncOnePage(
         result.commentsImported += n;
       }
     } catch (e) {
-      if (e instanceof GraphRequestError && e.mapped.kind === "permission") {
-        continue;
-      }
-      throw e;
+      if (e instanceof GraphRequestError && e.mapped.kind === "token") throw e;
+      continue;
     }
   }
 }

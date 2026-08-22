@@ -24,7 +24,7 @@ export function jaccard(a: string[], b: string[]): number {
 }
 
 const DISCLOSURE_RE =
-  /\b(paid partnership|paid partnership with|#ad\b|#sponsored|sponsored by|gifted|ambassador)\b/i;
+  /(?:^|\s)(#ad\b|#sponsored\b)|\b(paid partnership(?: with)?|sponsored by|gifted|ambassador)\b/i;
 const MERCH_HINT_RE =
   /\b(shop|buy|store|etsy|amazon|merch|tee|hoodie|printful|shopify|gumroad)\b/i;
 
@@ -108,6 +108,16 @@ export function runPolicyChecklist(input: {
 
   const canPublish = !flags.some((f) => f.severity === "block");
   return { flags, canPublish, duplicateScore, similar };
+}
+
+export function cadenceLevel(
+  postedLast24h: number,
+  warnAt: number,
+  blockAt: number,
+): "ok" | "warn" | "block" {
+  if (postedLast24h >= blockAt) return "block";
+  if (postedLast24h >= warnAt) return "warn";
+  return "ok";
 }
 
 export function validateReel(meta: {

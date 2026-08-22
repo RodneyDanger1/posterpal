@@ -8,10 +8,11 @@ import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { inGoldenHour, isBuyingIntent } from "@/lib/posterpal/operator";
-import { commentsFn, generateReplyDraftsFn, hideCommentFn, markCommentHandledFn, sendReplyFn, syncNowFn } from "@/lib/posterpal/fns";
-import type { CommentRow } from "@/lib/posterpal/types";
+import { commentsFn, generateReplyDraftsFn, hideCommentFn, markCommentHandledFn, sendReplyFn, snippetsFn, syncNowFn } from "@/lib/posterpal/fns";
+import type { CommentRow, SnippetRow } from "@/lib/posterpal/types";
 import { useShellStore } from "@/lib/store";
 import { relativeTime, copyText } from "@/lib/utils";
+import { Input } from "@/components/ui/input";
 
 export const Route = createFileRoute("/inbox")({ component: () => <Guard><Inbox /></Guard> });
 
@@ -32,6 +33,9 @@ function Inbox() {
   const [draft, setDraft] = useState("");
   const [syncing, setSyncing] = useState(false);
   const [phoneDetail, setPhoneDetail] = useState(false);
+  const [query, setQuery] = useState("");
+  const [snippets, setSnippets] = useState<SnippetRow[]>([]);
+  const [sending, setSending] = useState(false);
 
   const load = () => {
     const serverFilter = filter === "intent" ? "all" : filter;
@@ -46,21 +50,37 @@ function Inbox() {
   useEffect(load, [filter, pageId]);
 
   useEffect(() => {
+    void snippetsFn({ data: { pageId } })
+      .then(setSnippets)
+      .catch(() => setSnippets([]));
+  }, [pageId]);
+
+  const visible = rows.filter((c) => {
+    const q = query.trim().toLowerCase();
+    if (!q) return true;
+    return (
+      c.message.toLowerCase().includes(q) ||
+      (c.author_name ?? "").toLowerCase().includes(q) ||
+      (c.post_message ?? "").toLowerCase().includes(q)
+    );
+  });
+
+  useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement | null;
       if (t && (t.tagName === "TEXTAREA" || t.tagName === "INPUT" || t.isContentEditable)) return;
       if (e.key === "j" || e.key === "ArrowDown") {
         e.preventDefault();
         setActive((cur) => {
-          const i = rows.findIndex((c) => c.id === cur?.id);
-          return rows[Math.min(rows.length - 1, i + 1)] ?? cur;
+          const i = visible.findIndex((c) => c.id === cur?.id);
+          return visible[Math.min(visible.length - 1, i + 1)] ?? cur;
         });
       }
       if (e.key === "k" || e.key === "ArrowUp") {
         e.preventDefault();
         setActive((cur) => {
-          const i = rows.findIndex((c) => c.id === cur?.id);
-          return rows[Math.max(0, i - 1)] ?? cur;
+          const i = visible.findIndex((c) => c.id === cur?.id);
+          return visible[Math.max(0, i - 1)] ?? cur;
         });
       }
       if (e.key === "e" && active) {
@@ -71,7 +91,7 @@ function Inbox() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [rows, active?.id, filter, pageId]);
+  }, [visible, active?.id, filter, pageId]);
 
   useEffect(() => {
     if (!active) {
@@ -116,11 +136,20 @@ function Inbox() {
             <TabsTrigger value="all" title="Every imported comment for the selected Page">All</TabsTrigger>
           </TabsList>
         </Tabs>
+        <Input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search comments or authors"
+          className="mt-2"
+          title="Filters this list locally. Does not query Facebook."
+        />
         <ul className="mt-3 space-y-1">
-          {rows.length === 0 ? (
-            <li className="rounded-xl bg-card p-4 text-sm text-muted-foreground shadow-card">Inbox zero for this filter on the selected Page.</li>
+          {visible.length === 0 ? (
+            <li className="rounded-xl bg-card p-4 text-sm text-muted-foreground shadow-card">
+              {query.trim() ? "No comments match that search." : "Inbox zero for this filter on the selected Page."}
+            </li>
           ) : (
-            rows.map((c) => (
+            visible.map((c) => (
               <li key={c.id}>
                 <button
                   type="button"
@@ -175,6 +204,21 @@ function Inbox() {
             </p>
           ) : null}
           <div className="mt-4 space-y-2">
+            {snippets.length > 0 ? (
+              <div className="flex flex-wrap gap-2">
+                {snippets.map((sn) => (
+                  <button
+                    key={sn.id}
+                    type="button"
+                    className="rounded-full border border-border px-3 py-1 text-[12px] hover:bg-muted"
+                    title="Insert this saved reply. You still click Send."
+                    onClick={() => setDraft(sn.body)}
+                  >
+                    {sn.label}
+                  </button>
+                ))}
+              </div>
+            ) : null}
             <div className="flex flex-wrap gap-2">
               {draftsOf(active).map((d, i) => (
                 <button
@@ -191,16 +235,19 @@ function Inbox() {
             <div className="flex flex-wrap gap-2">
               <Button
                 onClick={() => {
+                  if (sending || !draft.trim()) return;
+                  setSending(true);
                   void sendReplyFn({ data: { commentId: active.id, message: draft } })
                     .then(() => {
                       toast.success("Reply sent by you — not by a bot.");
                       load();
                     })
-                    .catch((e: unknown) => toast.error(e instanceof Error ? e.message : "Send failed"));
+                    .catch((e: unknown) => toast.error(e instanceof Error ? e.message : "Send failed"))
+                    .finally(() => setSending(false));
                 }}
-                disabled={!draft.trim()}
+                disabled={!draft.trim() || sending}
               >
-                Send
+                {sending ? "Sending…" : "Send"}
               </Button>
               <Button
                 variant="outline"

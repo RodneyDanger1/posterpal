@@ -221,6 +221,13 @@ export type NeedsItem = {
 
 export type AgentSource = { title: string; url: string };
 
+export type ResearchNote = {
+  heading: string;
+  body: string;
+  url?: string;
+  confidence: "verified" | "unverified";
+};
+
 export type AgentResult = {
   summary: string;
   sources: AgentSource[];
@@ -230,6 +237,22 @@ export type AgentResult = {
   refused: string | null;
   liveSearch: boolean;
   runId: string;
+  topics: string[];
+  queries: string[];
+  notes: ResearchNote[];
+  pagePurpose: string;
+  profile: {
+    pageId: string;
+    name: string;
+    category: string | null;
+    brandVoice: string | null;
+    purpose: string;
+    localeHint: string | null;
+    topics: string[];
+    merch: Array<{ title: string; url: string }>;
+    recentCaptions: string[];
+    suggestedBriefs: string[];
+  } | null;
 };
 
 export type DeviceRow = {
@@ -257,6 +280,7 @@ export type ComposerInput = {
   variantLabel?: string | null;
   variantGroupId?: string | null;
   merchUrl?: string | null;
+  alsoPageIds?: string[];
   media?: Array<{
     fileName: string;
     mimeType?: string;
@@ -277,6 +301,7 @@ export type MediaLibraryItem = {
   data_url: string | null;
   page_name: string;
   mime_type: string | null;
+  created_with_ai: boolean;
 };
 
 export type AnalyticsPoint = {

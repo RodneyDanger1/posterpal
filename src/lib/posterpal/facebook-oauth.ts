@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { getSql } from "@/lib/db";
 import { decryptSecret, encryptSecret } from "./crypto";
-import { GRAPH_BASE, graphFetch, REQUIRED_SCOPES } from "./graph";
+import { GRAPH_BASE, graphCollect, GraphRequestError, graphFetch, REQUIRED_SCOPES } from "./graph";
 import { publicOrigin, redirectCandidates } from "./oauth-origin";
 import { setSetting } from "./repo";
 
@@ -162,15 +162,13 @@ async function persistUserToken(
 
 export async function importFacebookAccounts(userId: string, userToken: string, appSecret: string): Promise<number> {
   const sql = await getSql();
-  const accounts = await graphFetch<{
-    data?: Array<{
-      id: string;
-      name: string;
-      access_token?: string;
-      category?: string;
-      fan_count?: number;
-      tasks?: string[];
-    }>;
+  const accounts = await graphCollect<{
+    id: string;
+    name: string;
+    access_token?: string;
+    category?: string;
+    fan_count?: number;
+    tasks?: string[];
   }>({
     path: "/me/accounts",
     token: userToken,
@@ -179,9 +177,9 @@ export async function importFacebookAccounts(userId: string, userToken: string, 
   });
 
   let imported = 0;
-  for (const acct of accounts.data.data ?? []) {
-    const tasks = acct.tasks ?? [];
-    const canCreate = tasks.includes("CREATE_CONTENT");
+  for (const acct of accounts) {
+    const tasks = acct.tasks ?? null;
+    const canCreate = tasks ? tasks.includes("CREATE_CONTENT") : true;
     const existing = await sql<{ id: string }>`
       select id from pages where user_id = ${userId} and facebook_page_id = ${acct.id}
     `;
@@ -191,9 +189,9 @@ export async function importFacebookAccounts(userId: string, userToken: string, 
           name = ${acct.name},
           category = ${acct.category ?? null},
           fan_count = ${acct.fan_count ?? 0},
-          tasks_json = ${JSON.stringify(tasks)},
-          access_token_enc = ${acct.access_token ? encryptSecret(acct.access_token) : null},
-          is_read_only = ${!canCreate},
+          tasks_json = coalesce(${tasks ? JSON.stringify(tasks) : null}, tasks_json),
+          access_token_enc = coalesce(${acct.access_token ? encryptSecret(acct.access_token) : null}, access_token_enc),
+          is_read_only = coalesce(${tasks ? !canCreate : null}, is_read_only),
           is_practice = false,
           updated_at = now()
         where id = ${existing[0].id}
@@ -205,7 +203,7 @@ export async function importFacebookAccounts(userId: string, userToken: string, 
           access_token_enc, is_active, is_read_only, is_practice
         ) values (
           ${randomUUID()}, ${userId}, ${acct.id}, ${acct.name}, ${acct.category ?? null},
-          ${acct.fan_count ?? 0}, ${JSON.stringify(tasks)},
+          ${acct.fan_count ?? 0}, ${JSON.stringify(tasks ?? [])},
           ${acct.access_token ? encryptSecret(acct.access_token) : null},
           true, ${!canCreate}, false
         )
@@ -276,7 +274,9 @@ export async function refreshVaultTokens(userId: string): Promise<{ refreshed: b
     return { refreshed: true, warning: null };
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    await sql`update token_vault set last_validated_at = now() where id = ${row.id}`;
+    if (e instanceof GraphRequestError && e.mapped.kind === "token") {
+      await sql`update token_vault set is_valid = false, last_validated_at = now() where id = ${row.id}`;
+    }
     return { refreshed: false, warning: msg };
   }
 }
