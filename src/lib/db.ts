@@ -3,6 +3,8 @@ export type DbSource = "neon" | "pglite";
 
 // An empty/whitespace DATABASE_URL (an easy misconfig in deploy UIs) must mean
 // "unset" — otherwise production would silently run on the PGLite fallback.
+import { mkdirSync } from "node:fs";
+import { join } from "node:path";
 const rawDatabaseUrl =
   typeof process !== "undefined" ? process.env.DATABASE_URL : undefined;
 const databaseUrl =
@@ -81,13 +83,10 @@ function createNeonSql(): Promise<Sql> {
 }
 
 /** Directory for the on-disk PGLite store, or undefined for in-memory only. */
-function pgliteDataDir(): string | undefined {
+export function pgliteDataDir(): string | undefined {
   if (typeof process === "undefined") return undefined;
   if (process.env.PGLITE_MEMORY === "1") return undefined;
   try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { mkdirSync } = require("node:fs") as typeof import("node:fs");
-    const { join } = require("node:path") as typeof import("node:path");
     const dir = process.env.PGLITE_DATA_DIR?.trim() || join(process.cwd(), ".posterpal-pglite");
     mkdirSync(dir, { recursive: true });
     return dir;
