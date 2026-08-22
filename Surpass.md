@@ -1053,7 +1053,7 @@ Fallback:
 { "tools": [{ "type": "web_search", "filters": { "excluded_domains": ["facebook.com"] } }] }
 ```
 
-If `XAI_API_KEY` is missing: still show the **query plan + Page purpose + unverified notes from desk topics**. Never fake citations. Toast: “Drafted without live search — verify facts.”
+If `XAI_API_KEY` is missing: still show the **query plan + Page purpose + unverified notes from desk topics**. Never fake citations. Toast: “Drafted without live search — verify facts.” **Status: implemented 2026-08-21** — `runDeskAgent` no longer throws without a model; it runs the offline path (plan + unverified desk-topic notes + templated captions via `offlineCaptions`, `liveSearch:false`), persists the run, and the Agent tab toasts “Drafted without live search — verify facts.”
 
 ### 17.5 UI contract (Agent tab)
 

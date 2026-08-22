@@ -92,7 +92,44 @@ export async function runDeskAgent(
   const apiKey = await providerKey(userId, provider);
   const canGrok = aiAvailable();
   if (provider === "grok" && !canGrok && !apiKey) {
-    throw new Error("No caption model available. Grok is off in this environment — add a key in Settings.");
+    // §17.4: no caption model → still deliver the query plan, Page purpose, and
+    // unverified desk-topic notes. Never fake citations; never invent captions.
+    const brief = (input.mapPage ? mapBriefForPage(profile) : input.prompt).trim().slice(0, 2000);
+    const queries = planSearchQueries(profile, brief);
+    const researched = await liveResearch(profile, brief, queries);
+    const captions = offlineCaptions(profile, brief);
+    const laterTitle = (brief.split(/[\n.?!]/)[0] ?? "Idea").trim().slice(0, 60) || "Idea";
+    const runId = randomUUID();
+    const sql = await getSql();
+    const draftsPayload = JSON.stringify({
+      ...captions,
+      topics: profile.topics.slice(0, 8),
+      queries,
+      notes: researched.notes,
+      pagePurpose: profile.purpose,
+    });
+    await sql`
+      insert into agent_runs (id, user_id, page_id, prompt, summary, drafts_json, sources_json, image_prompt)
+      values (
+        ${runId}, ${userId}, ${input.pageId}, ${brief.slice(0, 2000)}, ${researched.summary.slice(0, 4000)},
+        ${draftsPayload}, '[]', ''
+      )
+    `;
+    return {
+      summary: researched.summary,
+      sources: [],
+      captions,
+      imagePrompt: "",
+      laterTitle,
+      refused: null,
+      liveSearch: false,
+      runId,
+      topics: profile.topics.slice(0, 8),
+      queries,
+      notes: researched.notes,
+      pagePurpose: profile.purpose,
+      profile,
+    };
   }
 
   const brief = (input.mapPage ? mapBriefForPage(profile) : input.prompt).trim().slice(0, 2000);
@@ -323,4 +360,20 @@ async function imagePromptFromBrief(
   } catch {
     return `Photoreal still for ${pageName}. ${brief.slice(0, 200)}. No text overlay, no logos.`;
   }
+}
+
+/**
+ * No-model fallback drafts (§17.4). Templated from desk data only — never
+ * invented facts. The operator edits these before anything goes near a Page.
+ */
+function offlineCaptions(profile: PageResearchProfile, brief: string) {
+  const merch = profile.merch[0];
+  const lead = (brief || profile.purpose).slice(0, 220);
+  return {
+    storytelling: `${profile.name}: ${lead}`,
+    cta: merch
+      ? `Shop ${merch.title}${merch.url ? ` — ${merch.url}` : ""}. Confirm stock before you post.`
+      : `Stop in or reply here — hours and stock get confirmed before this goes live.`,
+    question: `What would you like to see from ${profile.name} this week?`,
+  };
 }
