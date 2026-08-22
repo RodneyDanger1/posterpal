@@ -284,7 +284,7 @@ export const hashtagsFn = createServerFn({ method: "POST" })
 export const analyzeFn = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
   .validator((d: { content: string }) => d)
-  .handler(async ({ context, data }) => {
+  .handler(async ({ data }) => {
     const ops = await import("./ops");
     return ops.analyze(data.content);
   });

@@ -29,7 +29,6 @@ import { FacebookNameHelp } from "@/components/facebook-name-help";
 import { FacebookDomainHelp } from "@/components/facebook-domain-help";
 import { PageHeader } from "@/components/page-header";
 import { useShellStore } from "@/lib/store";
-import { copyText } from "@/lib/utils";
 
 export const Route = createFileRoute("/settings")({ component: () => <Guard><Settings /></Guard> });
 
@@ -69,8 +68,6 @@ function Settings() {
     const p = pages.find((x) => x.id === pageId);
     setVoice(p?.brand_voice ?? "");
   }, [pages, pageId]);
-
-  const page = pages.find((x) => x.id === pageId) ?? pages[0];
 
   return (
     <div className="mx-auto max-w-2xl space-y-4">

@@ -46,7 +46,7 @@ function parseDrafts(raw: string | null): {
   const captions = { storytelling: "", cta: "", question: "" };
   let topics: string[] = [];
   let queries: string[] = [];
-  let notes: ResearchNote[] = [];
+  const notes: ResearchNote[] = [];
   let pagePurpose = "";
   if (!raw) return { captions, topics, queries, notes, pagePurpose };
   try {

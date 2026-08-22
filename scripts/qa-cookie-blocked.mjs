@@ -45,7 +45,7 @@ if (blockStorage) {
     Object.defineProperty(document, "cookie", {
       configurable: true,
       get: () => "",
-      set: () => undefined,
+      set: () => {},
     });
   });
 }
