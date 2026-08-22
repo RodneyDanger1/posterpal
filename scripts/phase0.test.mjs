@@ -6,6 +6,7 @@ import {
   mapGraphError,
 } from "../src/lib/posterpal/graph.ts";
 import { monetizationFitness } from "../src/lib/posterpal/operator.ts";
+import { carouselPartialWarning } from "../src/lib/posterpal/carousel.ts";
 import { facebookAppNameIssues } from "../src/lib/posterpal/facebook-names.ts";
 
 // Regression tests for Surpass.md §8 (audit 2026-08-21) — the publish/reliability paths.
@@ -92,6 +93,24 @@ test("monetizationFitness: per-Page inputs drive the score, not desk-wide", () =
   const gap = monetizationFitness({ ...base, merchCount: 0, mixDiversity: 1 });
   assert.ok(gap.score < desk.score, "missing merch and a one-format mix must score lower");
   assert.ok(desk.items.some((i) => i.id === "failed" && !i.ok), "failed item must be a gap");
+});
+
+test("carouselPartialWarning: no dropped slides means no warning (#15)", () => {
+  assert.equal(carouselPartialWarning(5, []), null);
+});
+
+test("carouselPartialWarning: dropped slides are named, never silent (#15)", () => {
+  const w = carouselPartialWarning(5, ["stack-1.jpg", "stack-2.jpg"]);
+  assert.ok(w, "must warn when slides were dropped");
+  assert.match(w, /3 of 5 slides/);
+  assert.match(w, /stack-1\.jpg/);
+  assert.match(w, /stack-2\.jpg/);
+});
+
+test("carouselPartialWarning: all dropped still reports the numbers", () => {
+  const w = carouselPartialWarning(2, ["a.jpg", "b.jpg"]);
+  assert.ok(w);
+  assert.match(w, /0 of 2 slides/);
 });
 
 test("facebookAppNameIssues: BookBoss is rejected (Meta reads Book as a Facebook reference)", () => {

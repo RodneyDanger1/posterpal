@@ -16,6 +16,7 @@ import {
 import { cadenceForPage, getPage, getPageToken, getSetting, recordLog, recordQuota } from "./repo";
 import { runPolicyChecklist, validateReel } from "./policy";
 import { listContent } from "./repo";
+import { carouselPartialWarning } from "./carousel";
 import type { ComposerInput, ContentItemRow } from "./types";
 
 export async function saveAndDispatch(userId: string, input: ComposerInput) {
@@ -276,12 +277,15 @@ export async function attemptGraphPublish(
     const ctx = { token, appSecret, fbPageId, message, payload, mode, scheduledUnix };
 
     let graphId: string | undefined;
+    let carouselDropped: string[] = [];
     if (mediaType === "Reel") {
       graphId = await publishReel({ ...ctx, item: media[0] });
     } else if (mediaType === "Photo") {
       graphId = await publishPhoto({ ...ctx, item: media[0] });
     } else if (mediaType === "Carousel") {
-      graphId = await publishCarousel({ ...ctx, items: media });
+      const car = await publishCarousel({ ...ctx, items: media });
+      graphId = car.id;
+      carouselDropped = car.dropped;
     } else if (mediaType === "Video") {
       graphId = await publishVideo({ ...ctx, item: media[0] });
     } else if (mediaType === "Story") {
@@ -353,7 +357,10 @@ export async function attemptGraphPublish(
       }
     }
 
-    return { status: nextStatus, warning: null };
+    return {
+      status: nextStatus,
+      warning: carouselPartialWarning(media.length, carouselDropped),
+    };
   } catch (err) {
     const mapped = err instanceof GraphRequestError ? err.mapped : null;
     if (err instanceof GraphRequestError && err.quota) {
@@ -441,30 +448,40 @@ async function publishPhoto(ctx: PublishCtx & { item?: ContentItemRow }): Promis
   return graphObjectId(res.data);
 }
 
-async function publishCarousel(ctx: PublishCtx & { items: ContentItemRow[] }): Promise<string | undefined> {
+async function publishCarousel(
+  ctx: PublishCtx & { items: ContentItemRow[] },
+): Promise<{ id: string | undefined; dropped: string[] }> {
   if (ctx.items.length === 0) throw new Error("Carousel needs at least one image.");
   const ids: string[] = [];
+  const dropped: string[] = [];
   for (const item of ctx.items) {
-    const src = await resolveMedia(item);
-    if (!src) throw new Error(`Carousel image "${item.file_name}" has no file or https URL to upload.`);
-    if (src.kind === "http") {
-      const uploaded = await graphFetch<{ id?: string }>({
-        path: `/${ctx.fbPageId}/photos`,
-        method: "POST",
-        token: ctx.token,
-        appSecret: ctx.appSecret,
-        form: { url: src.url, published: false, alt_text_custom: item.alt_text || undefined },
-      });
-      if (uploaded.data.id) ids.push(uploaded.data.id);
-    } else {
-      const uploaded = await graphMultipart<{ id?: string }>({
-        path: `/${ctx.fbPageId}/photos`,
-        token: ctx.token,
-        appSecret: ctx.appSecret,
-        fields: { published: false, alt_text_custom: item.alt_text || undefined },
-        file: { fieldName: "source", bytes: src.bytes, fileName: src.fileName, mime: src.mime },
-      });
-      if (uploaded.data.id) ids.push(uploaded.data.id);
+    try {
+      const src = await resolveMedia(item);
+      if (!src) throw new Error(`Carousel image "${item.file_name}" has no file or https URL to upload.`);
+      if (src.kind === "http") {
+        const uploaded = await graphFetch<{ id?: string }>({
+          path: `/${ctx.fbPageId}/photos`,
+          method: "POST",
+          token: ctx.token,
+          appSecret: ctx.appSecret,
+          form: { url: src.url, published: false, alt_text_custom: item.alt_text || undefined },
+        });
+        if (uploaded.data.id) ids.push(uploaded.data.id);
+        else dropped.push(item.file_name);
+      } else {
+        const uploaded = await graphMultipart<{ id?: string }>({
+          path: `/${ctx.fbPageId}/photos`,
+          token: ctx.token,
+          appSecret: ctx.appSecret,
+          fields: { published: false, alt_text_custom: item.alt_text || undefined },
+          file: { fieldName: "source", bytes: src.bytes, fileName: src.fileName, mime: src.mime },
+        });
+        if (uploaded.data.id) ids.push(uploaded.data.id);
+        else dropped.push(item.file_name);
+      }
+    } catch (e) {
+      // #15: one bad slide must not silently vanish — report it, post the rest.
+      dropped.push(`${item.file_name} (${e instanceof Error ? e.message : String(e)})`);
     }
   }
   if (ids.length === 0) throw new Error("Could not upload any carousel images.");
@@ -483,7 +500,7 @@ async function publishCarousel(ctx: PublishCtx & { items: ContentItemRow[] }): P
     appSecret: ctx.appSecret,
     form,
   });
-  return graphObjectId(res.data);
+  return { id: graphObjectId(res.data), dropped };
 }
 
 async function publishVideo(ctx: PublishCtx & { item?: ContentItemRow }): Promise<string | undefined> {
