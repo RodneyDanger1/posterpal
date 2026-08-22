@@ -6,6 +6,7 @@ import {
   mapGraphError,
 } from "../src/lib/posterpal/graph.ts";
 import { monetizationFitness } from "../src/lib/posterpal/operator.ts";
+import { facebookAppNameIssues } from "../src/lib/posterpal/facebook-names.ts";
 
 // Regression tests for Surpass.md §8 (audit 2026-08-21) — the publish/reliability paths.
 
@@ -91,4 +92,29 @@ test("monetizationFitness: per-Page inputs drive the score, not desk-wide", () =
   const gap = monetizationFitness({ ...base, merchCount: 0, mixDiversity: 1 });
   assert.ok(gap.score < desk.score, "missing merch and a one-format mix must score lower");
   assert.ok(desk.items.some((i) => i.id === "failed" && !i.ok), "failed item must be a gap");
+});
+
+test("facebookAppNameIssues: BookBoss is rejected (Meta reads Book as a Facebook reference)", () => {
+  const issues = facebookAppNameIssues("BookBoss");
+  assert.ok(issues.some((i) => /Book/i.test(i)), issues.join("; "));
+  assert.equal(facebookAppNameIssues("BookBoss").length > 0, true);
+});
+
+test("facebookAppNameIssues: PosterPal and the safe suggestions are allowed", () => {
+  for (const n of ["PosterPal", "PageDesk", "ShoreDesk", "DeskPages", "WinonaDesk"]) {
+    assert.deepEqual(facebookAppNameIssues(n), [], n);
+  }
+});
+
+test("facebookAppNameIssues: Facebook/FB/Meta/Instagram/WhatsApp/Oculus are rejected", () => {
+  for (const n of ["Facebook", "FB", "Meta", "InstaBook", "WhatsApp", "Oculus"]) {
+    assert.ok(facebookAppNameIssues(n).length > 0, n);
+  }
+});
+
+test("facebookAppNameIssues: Notebook and MyBook are not Book-readings", () => {
+  assert.deepEqual(facebookAppNameIssues("Notebook"), []);
+  assert.deepEqual(facebookAppNameIssues("MyBook"), []);
+  // Face at a word START is a Facebook reading (conservative): FaceID, FaceTime…
+  assert.ok(facebookAppNameIssues("FaceID").length > 0);
 });

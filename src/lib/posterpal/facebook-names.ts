@@ -15,15 +15,16 @@ export const FB_APP_NAME_SUGGESTIONS = [
 ] as const;
 
 const FORBIDDEN = [
-  { re: /\bfacebook\b/i, why: "Cannot contain “Facebook”." },
-  { re: /\bfb\b/i, why: "Cannot contain “FB”." },
+  { re: /\bfacebook\b|\bfb/i, why: "Cannot contain “Facebook” or “FB”." },
   { re: /\bmeta\b/i, why: "Cannot contain “Meta”." },
-  { re: /\binstagram\b|\binsta\b/i, why: "Cannot contain Instagram / Insta." },
+  { re: /\binstagram|\binsta/i, why: "Cannot contain Instagram / Insta." },
   { re: /\bwhatsapp\b/i, why: "Cannot contain WhatsApp." },
   { re: /\boculus\b/i, why: "Cannot contain Oculus." },
   { re: /\bthreads\b/i, why: "Cannot contain Threads." },
-  { re: /\bbook\b/i, why: "Cannot contain “Book” — Meta reads it as a Facebook reference. PosterPal is fine." },
-  { re: /\bface\b/i, why: "Cannot contain “Face” if it could be read as Facebook." },
+  // Meta reads “Book” / “Face” at the START of a word as a Facebook reference —
+  // that is why BookBoss was rejected even though `\bbook\b` never matched it.
+  { re: /\bbook/i, why: "Cannot contain “Book” — Meta reads it as a Facebook reference (BookBoss was rejected). PosterPal is fine." },
+  { re: /\bface/i, why: "Cannot contain “Face” if it could be read as Facebook." },
 ];
 
 export function facebookAppNameIssues(name: string): string[] {

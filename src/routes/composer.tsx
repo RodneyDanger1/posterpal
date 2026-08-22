@@ -828,8 +828,25 @@ async function submit(s: ReturnType<typeof useComposerState>, mode: Mode) {
   if (!s.selected) return;
   if (s.busy) return;
   if (s.policy && !s.policy.canPublish && mode !== "local-draft") {
-    toast.error("Policy checklist blocked this publish. Fix the blocking flags or save a local draft.");
-    return;
+    // The policy effect debounces 250ms — a fast Send can see a stale policy
+    // (e.g. the empty-caption block from before the caption landed). Re-check
+    // fresh before refusing; the server enforces truth either way.
+    const fresh = await policyFn({
+      data: {
+        pageId: s.selected.id,
+        message: s.message,
+        link: s.link || null,
+        merchUrl: s.merch.find((m) => m.id === s.selectedMerchId)?.url ?? null,
+        hasImages: s.media.length > 0,
+        missingAlt: s.media.some((m) => !m.altText.trim()),
+        createdWithAi: s.media.some((m) => m.createdWithAi),
+      },
+    }).catch(() => null);
+    if (fresh && !fresh.canPublish) {
+      const block = fresh.flags.find((f) => f.severity === "block");
+      toast.error(block?.detail ?? "Policy checklist blocked this publish. Fix the blocking flags or save a local draft.");
+      return;
+    }
   }
   if (s.cadence?.level === "block" && mode !== "local-draft") {
     toast.error("Cadence hard cap reached.");
