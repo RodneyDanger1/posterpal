@@ -108,7 +108,7 @@ var HEADERS = { TSS_SHELL: "X-TSS_SHELL" };
 * the dev styles URL for route-scoped CSS collection.
 */
 async function getStartManifest(matchedRoutes) {
-	const { tsrStartManifest } = await import("../_tanstack-start-manifest_v-BE7s0h0-.mjs");
+	const { tsrStartManifest } = await import("../_tanstack-start-manifest_v-BrjefjwS.mjs");
 	const startManifest = tsrStartManifest();
 	let routes = startManifest.routes;
 	routes[rootRouteId];
@@ -130,227 +130,231 @@ async function getStartManifest(matchedRoutes) {
 var manifest = {
 	"16779566fcbf35dcabc38f8a4519fb04f0ef6091244d211de4eafde18831a83f": {
 		functionName: "savePrefs_createServerFn_handler",
-		importer: () => import("./fns-bzvVO0C-.mjs")
+		importer: () => import("./fns-WnF985rH.mjs")
 	},
 	"2d0dd5e9dc21f2107a2fd5f1c15e081c1098c518348d8af20ee75257bb5253a4": {
 		functionName: "facebookStatusFn_createServerFn_handler",
-		importer: () => import("./fns-bzvVO0C-.mjs")
+		importer: () => import("./fns-WnF985rH.mjs")
 	},
 	"2e2e65c21178feb85d7c60d03edc74c4b155e17311a4f36231400be58ddccc18": {
 		functionName: "updatePageVoiceFn_createServerFn_handler",
-		importer: () => import("./fns-bzvVO0C-.mjs")
+		importer: () => import("./fns-WnF985rH.mjs")
 	},
 	"2fbf7e8ccf7823fe7e272ba69ee93c01a43d9968349cccd72697c929816b29d7": {
 		functionName: "publishNowFn_createServerFn_handler",
-		importer: () => import("./fns-bzvVO0C-.mjs")
+		importer: () => import("./fns-WnF985rH.mjs")
 	},
 	"38fbdf601fd6c95cd464f586e5729329c5c93fd2efadf273d48d09ef7d32dc4a": {
 		functionName: "composeFn_createServerFn_handler",
-		importer: () => import("./fns-bzvVO0C-.mjs")
+		importer: () => import("./fns-WnF985rH.mjs")
 	},
 	"420faa0ffe5f48d22f32791f1db04dcd344e7eba79c9567c1426beac1a958657": {
 		functionName: "logsFn_createServerFn_handler",
-		importer: () => import("./fns-bzvVO0C-.mjs")
+		importer: () => import("./fns-WnF985rH.mjs")
 	},
 	"421147fd0293839c177b1351dce70408a951d57d195eee3944401d367b1d1eb1": {
 		functionName: "saveSnippetFn_createServerFn_handler",
-		importer: () => import("./fns-bzvVO0C-.mjs")
+		importer: () => import("./fns-WnF985rH.mjs")
 	},
 	"45109f8b48e5a26f668f015c2ff29de55e1bab2ca8c833944f68a546319c42d8": {
 		functionName: "revokeDeviceFn_createServerFn_handler",
-		importer: () => import("./fns-bzvVO0C-.mjs")
+		importer: () => import("./fns-WnF985rH.mjs")
 	},
 	"4903044adb85f32e430596608db8466ace0c004c1e5c489751f2fc49a80df083": {
 		functionName: "startPractice_createServerFn_handler",
-		importer: () => import("./fns-bzvVO0C-.mjs")
+		importer: () => import("./fns-WnF985rH.mjs")
 	},
 	"49b0fbd4953706ed1b0e6ed4675bd3924eab844f06f17af5c6e7655db14274e2": {
 		functionName: "analyzeFn_createServerFn_handler",
-		importer: () => import("./fns-bzvVO0C-.mjs")
+		importer: () => import("./fns-WnF985rH.mjs")
 	},
 	"4af2c0be73d92590f6842dcde81e22dc1cf210f8add75a2e266ba8e86b009884": {
 		functionName: "cancelPostFn_createServerFn_handler",
-		importer: () => import("./fns-bzvVO0C-.mjs")
+		importer: () => import("./fns-WnF985rH.mjs")
 	},
 	"4c8886216d31d697b2d5d74e7cd62bf3c0b4255c53d1e62d33240b680bf68bf5": {
 		functionName: "calendarFn_createServerFn_handler",
-		importer: () => import("./fns-bzvVO0C-.mjs")
+		importer: () => import("./fns-WnF985rH.mjs")
 	},
 	"4e798644f83c72ca4f16a55e35aeb593adbc38c0ff62744d45c35b6cd5b63074": {
 		functionName: "exportCsvFn_createServerFn_handler",
-		importer: () => import("./fns-bzvVO0C-.mjs")
+		importer: () => import("./fns-WnF985rH.mjs")
 	},
 	"504de30e4ac98e5aacffd74e7d5e04b6707b0510b6429dcc364190a002dc2b66": {
 		functionName: "vaultFn_createServerFn_handler",
-		importer: () => import("./fns-bzvVO0C-.mjs")
+		importer: () => import("./fns-WnF985rH.mjs")
 	},
 	"52f8881df8059608fe7ebf000227eaa2f5f2a4d5909dd05d43a76e5140706fb7": {
 		functionName: "rescheduleFn_createServerFn_handler",
-		importer: () => import("./fns-bzvVO0C-.mjs")
+		importer: () => import("./fns-WnF985rH.mjs")
 	},
 	"5f56b7f82de2ccefa8722baaf94aeea12b84f3fe48f037ea0c5fe9b9e01c58ba": {
 		functionName: "markCommentHandledFn_createServerFn_handler",
-		importer: () => import("./fns-bzvVO0C-.mjs")
+		importer: () => import("./fns-WnF985rH.mjs")
 	},
 	"640a2387de8ffe7077a529bd5969e0d1de3dfc22a787b531b1e6bc326f91f882": {
 		functionName: "cadenceFn_createServerFn_handler",
-		importer: () => import("./fns-bzvVO0C-.mjs")
+		importer: () => import("./fns-WnF985rH.mjs")
 	},
 	"6b729d5efeccf8c56a2c0f7d8f2ffa19b9230e591168466dabb3ef489a685c23": {
 		functionName: "importFacebookTokenFn_createServerFn_handler",
-		importer: () => import("./fns-bzvVO0C-.mjs")
+		importer: () => import("./fns-WnF985rH.mjs")
 	},
 	"730554fc457dd75e97310c20ae7663f778b7f0e446f8a7d98d3761b5cfd2a15b": {
 		functionName: "clonePostFn_createServerFn_handler",
-		importer: () => import("./fns-bzvVO0C-.mjs")
+		importer: () => import("./fns-WnF985rH.mjs")
 	},
 	"736feff8150bf83510dc7957e89db3bdac322082f16d87f3a8eaba15ae08058a": {
 		functionName: "searchFn_createServerFn_handler",
-		importer: () => import("./fns-bzvVO0C-.mjs")
+		importer: () => import("./fns-WnF985rH.mjs")
 	},
 	"750f48f416ab6a44c8c79503b0a06f527f294821cd350c26903b84b1934ac232": {
 		functionName: "commentsFn_createServerFn_handler",
-		importer: () => import("./fns-bzvVO0C-.mjs")
+		importer: () => import("./fns-WnF985rH.mjs")
 	},
 	"752f2ae6659848aaba705c85a77e94b94d124357ef99a194ee8723fa3a31ec65": {
 		functionName: "createPairingFn_createServerFn_handler",
-		importer: () => import("./fns-bzvVO0C-.mjs")
+		importer: () => import("./fns-WnF985rH.mjs")
 	},
 	"780d3c401fee3f5fd9994486929b1f67ff7f0f2c81f78e3b022bfd64dc223a46": {
 		functionName: "sendReplyFn_createServerFn_handler",
-		importer: () => import("./fns-bzvVO0C-.mjs")
+		importer: () => import("./fns-WnF985rH.mjs")
 	},
 	"79f4c00f0f2ffab9ede2627498d78b612c91f460058f54db99635785b7f4ce6b": {
 		functionName: "snippetsFn_createServerFn_handler",
-		importer: () => import("./fns-bzvVO0C-.mjs")
+		importer: () => import("./fns-WnF985rH.mjs")
 	},
 	"7b580abfa42c7ae022d03f640f10cf1db266ca2dbb9f104beec6697a2d372662": {
 		functionName: "deleteIdeaFn_createServerFn_handler",
-		importer: () => import("./fns-bzvVO0C-.mjs")
+		importer: () => import("./fns-WnF985rH.mjs")
 	},
 	"7dfc282c4adeaa34d20c533a33fc86422b4c92b640b337b8c786b5dc30de800a": {
 		functionName: "pageProfileFn_createServerFn_handler",
-		importer: () => import("./fns-bzvVO0C-.mjs")
+		importer: () => import("./fns-WnF985rH.mjs")
 	},
 	"83004cbbdc826408f4668e28163a965dcc885fb5fe35f64fe544a11459d0032f": {
 		functionName: "analyticsFn_createServerFn_handler",
-		importer: () => import("./fns-bzvVO0C-.mjs")
+		importer: () => import("./fns-WnF985rH.mjs")
 	},
 	"86b2fbd16f667e287500b40b6df321d9878a129caa2ca1df5c8893c5a6814114": {
 		functionName: "listDevicesFn_createServerFn_handler",
-		importer: () => import("./fns-bzvVO0C-.mjs")
+		importer: () => import("./fns-WnF985rH.mjs")
 	},
 	"93df7435c504794e8b84f6528c91951ae7916adbf2d10bbdf47c358ef3a12156": {
 		functionName: "merchFn_createServerFn_handler",
-		importer: () => import("./fns-bzvVO0C-.mjs")
+		importer: () => import("./fns-WnF985rH.mjs")
 	},
 	"993b233fe2f282f497c67f18c01ee03ec4ffdcff76ac824111fc73a5d0aa5f98": {
 		functionName: "ideasFn_createServerFn_handler",
-		importer: () => import("./fns-bzvVO0C-.mjs")
+		importer: () => import("./fns-WnF985rH.mjs")
 	},
 	"a3ad4f9bc80879185c702cccbfb30e2fda7c94e0464c5c4c3482f26dbc315d84": {
 		functionName: "listPagesFn_createServerFn_handler",
-		importer: () => import("./fns-bzvVO0C-.mjs")
+		importer: () => import("./fns-WnF985rH.mjs")
 	},
 	"a5f629cbe6236813a41151c0a42ecf86962315fb90bf6860a49651ac9dfa2c03": {
 		functionName: "saveAiKeysFn_createServerFn_handler",
-		importer: () => import("./fns-bzvVO0C-.mjs")
+		importer: () => import("./fns-WnF985rH.mjs")
 	},
 	"aa1e051855bfe204507f0ef4aeebbc4580f07acbd8fb44959466f0aa4aff8220": {
 		functionName: "tickFn_createServerFn_handler",
-		importer: () => import("./fns-bzvVO0C-.mjs")
+		importer: () => import("./fns-WnF985rH.mjs")
 	},
 	"b749d3c36297182e3881ee0f87fe9748e0aeafd9a0135f48b24db1ffe0060a74": {
 		functionName: "getSettingsFn_createServerFn_handler",
-		importer: () => import("./fns-bzvVO0C-.mjs")
+		importer: () => import("./fns-WnF985rH.mjs")
 	},
 	"ba59647d7b2fd67fcbecf5fc324561470012345a45f31b6604ae6bfca5582ae4": {
 		functionName: "hashtagsFn_createServerFn_handler",
-		importer: () => import("./fns-bzvVO0C-.mjs")
+		importer: () => import("./fns-WnF985rH.mjs")
 	},
 	"be895c620d2489a208460255688c09d4b10cfeaf353e4bfd9abb6c5280c4918d": {
 		functionName: "listAgentRunsFn_createServerFn_handler",
-		importer: () => import("./fns-bzvVO0C-.mjs")
+		importer: () => import("./fns-WnF985rH.mjs")
+	},
+	"bfae6d97a5c947919b65d9ad95dcbeceac0a5b336e325b3565a8cc73926b77d0": {
+		functionName: "firstRunFn_createServerFn_handler",
+		importer: () => import("./fns-WnF985rH.mjs")
 	},
 	"c0a372316649c64b619440c67289da248b2defa3c9ecb68e7c186267c750874e": {
 		functionName: "deleteSnippetFn_createServerFn_handler",
-		importer: () => import("./fns-bzvVO0C-.mjs")
+		importer: () => import("./fns-WnF985rH.mjs")
 	},
 	"c1487b223c502a6a1e9c1e9f4fce9e6457b7aa91bf1ea7a6e4e66d51a0c2e225": {
 		functionName: "policyFn_createServerFn_handler",
-		importer: () => import("./fns-bzvVO0C-.mjs")
+		importer: () => import("./fns-WnF985rH.mjs")
 	},
 	"c5094d35ed864884d21f01b1e6cdcd9f7d5a5950bc6cf508fb02b4a2ce17f94d": {
 		functionName: "saveIdeaFn_createServerFn_handler",
-		importer: () => import("./fns-bzvVO0C-.mjs")
+		importer: () => import("./fns-WnF985rH.mjs")
 	},
 	"c8accfafd9dc47b5118ada337059156824f39befa8287a0161215ef4ecc5a960": {
 		functionName: "completeSetup_createServerFn_handler",
-		importer: () => import("./fns-bzvVO0C-.mjs")
+		importer: () => import("./fns-WnF985rH.mjs")
 	},
 	"cab5f0bbd2302a766b08c993c408736a338cd4fff87eb95a04b02fcef6cc74e6": {
 		functionName: "listPostsFn_createServerFn_handler",
-		importer: () => import("./fns-bzvVO0C-.mjs")
+		importer: () => import("./fns-WnF985rH.mjs")
 	},
 	"d5d3501e4dcb79f95345524c9e2392375b9880a4e8693814eb365fd191dc181d": {
 		functionName: "deleteMerchFn_createServerFn_handler",
-		importer: () => import("./fns-bzvVO0C-.mjs")
+		importer: () => import("./fns-WnF985rH.mjs")
 	},
 	"d82b5a0af9976da85bffaa189fc7a0cc02b8902fa8981fde4d275e5914e48c4e": {
 		functionName: "runAgentFn_createServerFn_handler",
-		importer: () => import("./fns-bzvVO0C-.mjs")
+		importer: () => import("./fns-WnF985rH.mjs")
 	},
 	"db22141b532ad9ee39f103d85d37ed03444f5ce2f9d4a465f7ae130047d6eef7": {
 		functionName: "beginFacebookOAuth_createServerFn_handler",
-		importer: () => import("./fns-bzvVO0C-.mjs")
+		importer: () => import("./fns-WnF985rH.mjs")
 	},
 	"db5030bd1b3322415e9d1474118663b617047e3ec5637c2315180379a14f100f": {
 		functionName: "saveMerchFn_createServerFn_handler",
-		importer: () => import("./fns-bzvVO0C-.mjs")
+		importer: () => import("./fns-WnF985rH.mjs")
 	},
 	"dc3d8ba686f61d5b58e3cd4cceeb49829d9e4a1a24a351463651d2cf80a1a4f6": {
 		functionName: "needsYouFn_createServerFn_handler",
-		importer: () => import("./fns-bzvVO0C-.mjs")
+		importer: () => import("./fns-WnF985rH.mjs")
 	},
 	"ead4fcfa1a6e2457d796dae35552d120bf55164467293395a5b570eb2b224657": {
 		functionName: "saveFacebookApp_createServerFn_handler",
-		importer: () => import("./fns-bzvVO0C-.mjs")
+		importer: () => import("./fns-WnF985rH.mjs")
 	},
 	"ef6a0d7d6fdbe531cb913caaf5d260087739b7437a0371d2917740f6507b3d67": {
 		functionName: "mediaLibraryFn_createServerFn_handler",
-		importer: () => import("./fns-bzvVO0C-.mjs")
+		importer: () => import("./fns-WnF985rH.mjs")
 	},
 	"eff901982815fc94c596db73b93d64993d0300dead7aa223f1c51dadb7168ad8": {
 		functionName: "generateVariantsFn_createServerFn_handler",
-		importer: () => import("./fns-bzvVO0C-.mjs")
+		importer: () => import("./fns-WnF985rH.mjs")
 	},
 	"f340a0ae67c0991b548857a6112523a4e9e76e4131318ed0fcca37b48dc105ef": {
 		functionName: "moveIdeaFn_createServerFn_handler",
-		importer: () => import("./fns-bzvVO0C-.mjs")
+		importer: () => import("./fns-WnF985rH.mjs")
 	},
 	"f4dcd40e80a616f1cc54e8f947dd9b9162b2d9a4f6d528b162fe8e2b783c8294": {
 		functionName: "getPostBundle_createServerFn_handler",
-		importer: () => import("./fns-bzvVO0C-.mjs")
+		importer: () => import("./fns-WnF985rH.mjs")
 	},
 	"f5ead769cbc8ce1ce7898b9a00daf8b68c03d8ee81d79d9c4b1669b4feb8a343": {
 		functionName: "generateReplyDraftsFn_createServerFn_handler",
-		importer: () => import("./fns-bzvVO0C-.mjs")
+		importer: () => import("./fns-WnF985rH.mjs")
 	},
 	"fa09cb2e8f6a01acc463c849692e164021ecffa232927bde9f221a8b2a4bfd96": {
 		functionName: "imaginePhotoFn_createServerFn_handler",
-		importer: () => import("./fns-bzvVO0C-.mjs")
+		importer: () => import("./fns-WnF985rH.mjs")
 	},
 	"fa834ac5003fb3c46c29da19ab746c64bb7112beb2857c2cfc5e234b21abcd42": {
 		functionName: "hideCommentFn_createServerFn_handler",
-		importer: () => import("./fns-bzvVO0C-.mjs")
+		importer: () => import("./fns-WnF985rH.mjs")
 	},
 	"fb2d1b4ed2a9a90a4903574970d550d59afb469407b9d13671e836f05e87d6cb": {
 		functionName: "syncNowFn_createServerFn_handler",
-		importer: () => import("./fns-bzvVO0C-.mjs")
+		importer: () => import("./fns-WnF985rH.mjs")
 	},
 	"fd1d64cfbb25e7f275625ace3ec35eea616eec015e73c0d18b0de64dceddbc39": {
 		functionName: "bootstrapApp_createServerFn_handler",
-		importer: () => import("./fns-bzvVO0C-.mjs")
+		importer: () => import("./fns-WnF985rH.mjs")
 	}
 };
 async function getServerFnById(id, access) {
@@ -1620,7 +1624,7 @@ var getBaseManifest = getProdBaseManifest;
 var createEarlyHintsForRequest = createEarlyHintsCollector;
 async function loadEntries() {
 	const [routerEntry, startEntry, pluginAdapters] = await Promise.all([
-		import("./router-Fw7-5wkv.mjs").then((n) => n.c).then((n) => n.t),
+		import("./router-B61HJkOm.mjs").then((n) => n.n).then((n) => n.t),
 		import("./start-5Z2QO8AU.mjs"),
 		import("./empty-plugin-adapters-D9UWiqvJ.mjs")
 	]);

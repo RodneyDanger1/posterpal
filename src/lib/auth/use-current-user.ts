@@ -34,7 +34,8 @@ export type CurrentUserState = {
 /**
  * Current user + loading state.
  *   - Auth disabled (PosterPal default) -> Operator, never pending.
- *   - Auth enabled -> real session, or Operator fallback so the desk never blocks.
+ *   - Auth enabled -> the real session, or `null` when signed out (so the Guard
+ *     redirects to the login wall instead of silently running as `dev-user`).
  */
 export function useCurrentUserState(): CurrentUserState {
   if (!authEnabled) return { user: DEV_USER, isPending: false };
@@ -49,7 +50,7 @@ export function useCurrentUserState(): CurrentUserState {
           profileImageUrl: user.image ?? null,
           isDevFallback: false,
         }
-      : DEV_USER,
+      : null,
     isPending: isPending && !user,
   };
 }

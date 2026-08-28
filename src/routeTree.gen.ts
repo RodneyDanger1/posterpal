@@ -24,6 +24,7 @@ import { Route as PairRouteImport } from './routes/pair'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as SetupRouteImport } from './routes/setup'
 import { Route as VaultRouteImport } from './routes/vault'
+import { Route as ApiHealthRouteImport } from './routes/api/health'
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
 import { Route as ApiFacebookCallbackRouteImport } from './routes/api/facebook/callback'
 import { Route as ApiFacebookStartRouteImport } from './routes/api/facebook/start'
@@ -105,6 +106,11 @@ const VaultRoute = VaultRouteImport.update({
   path: '/vault',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiHealthRoute = ApiHealthRouteImport.update({
+  id: '/api/health',
+  path: '/api/health',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiAuthSplatRoute = ApiAuthSplatRouteImport.update({
   id: '/api/auth/$',
   path: '/api/auth/$',
@@ -147,6 +153,7 @@ export interface FileRoutesByFullPath {
   '/settings': typeof SettingsRoute
   '/setup': typeof SetupRoute
   '/vault': typeof VaultRoute
+  '/api/health': typeof ApiHealthRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/facebook/callback': typeof ApiFacebookCallbackRoute
   '/api/facebook/start': typeof ApiFacebookStartRoute
@@ -169,6 +176,7 @@ export interface FileRoutesByTo {
   '/settings': typeof SettingsRoute
   '/setup': typeof SetupRoute
   '/vault': typeof VaultRoute
+  '/api/health': typeof ApiHealthRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/facebook/callback': typeof ApiFacebookCallbackRoute
   '/api/facebook/start': typeof ApiFacebookStartRoute
@@ -192,6 +200,7 @@ export interface FileRoutesById {
   '/settings': typeof SettingsRoute
   '/setup': typeof SetupRoute
   '/vault': typeof VaultRoute
+  '/api/health': typeof ApiHealthRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/facebook/callback': typeof ApiFacebookCallbackRoute
   '/api/facebook/start': typeof ApiFacebookStartRoute
@@ -216,6 +225,7 @@ export interface FileRouteTypes {
     | '/settings'
     | '/setup'
     | '/vault'
+    | '/api/health'
     | '/api/auth/$'
     | '/api/facebook/callback'
     | '/api/facebook/start'
@@ -238,6 +248,7 @@ export interface FileRouteTypes {
     | '/settings'
     | '/setup'
     | '/vault'
+    | '/api/health'
     | '/api/auth/$'
     | '/api/facebook/callback'
     | '/api/facebook/start'
@@ -260,6 +271,7 @@ export interface FileRouteTypes {
     | '/settings'
     | '/setup'
     | '/vault'
+    | '/api/health'
     | '/api/auth/$'
     | '/api/facebook/callback'
     | '/api/facebook/start'
@@ -283,6 +295,7 @@ export interface RootRouteChildren {
   SettingsRoute: typeof SettingsRoute
   SetupRoute: typeof SetupRoute
   VaultRoute: typeof VaultRoute
+  ApiHealthRoute: typeof ApiHealthRoute
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
   ApiFacebookCallbackRoute: typeof ApiFacebookCallbackRoute
   ApiFacebookStartRoute: typeof ApiFacebookStartRoute
@@ -397,6 +410,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof VaultRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/health': {
+      id: '/api/health'
+      path: '/api/health'
+      fullPath: '/api/health'
+      preLoaderRoute: typeof ApiHealthRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/auth/$': {
       id: '/api/auth/$'
       path: '/api/auth/$'
@@ -451,6 +471,7 @@ const rootRouteChildren: RootRouteChildren = {
   SettingsRoute: SettingsRoute,
   SetupRoute: SetupRoute,
   VaultRoute: VaultRoute,
+  ApiHealthRoute: ApiHealthRoute,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
   ApiFacebookCallbackRoute: ApiFacebookCallbackRoute,
   ApiFacebookStartRoute: ApiFacebookStartRoute,

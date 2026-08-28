@@ -79,9 +79,17 @@ const grokIssuer = env("GROK_AUTH_ISSUER") ?? GROK_ISSUER_DEFAULT;
 const grokClientId = env("GROK_AUTH_CLIENT_ID") ?? PREVIEW_CLIENT_ID;
 const grokClientSecret = env("GROK_AUTH_CLIENT_SECRET") ?? PREVIEW_CLIENT_SECRET;
 
-/** True when federated sign-in is active (real auth is enforced). */
+/** True when ANY auth method is active and enforcement should be on.
+ * Email/password alone is sufficient (no Grok broker needed) — this is what
+ * makes PosterPal self-hostable: enable email/password and build with
+ * `VITE_AUTH_ENABLED` not set to "false" to require a real login. */
 export const authConfigured =
-  !authDisabled && Boolean(grokClientId && grokClientSecret);
+  !authDisabled && (emailAndPasswordEnabled || Boolean(grokClientId && grokClientSecret));
+
+/** Whether the Grok auth broker's genericOAuth plugin can be wired (needs a real
+ * client id/secret). Separate from `authConfigured` so email/password auth works
+ * standalone without the broker. */
+const grokOAuthReady = Boolean(grokClientId && grokClientSecret);
 
 // This app's own Better Auth origin. When deployed the deployer injects the
 // public URL. In the sandbox live preview there's no fixed URL (each preview gets
@@ -147,7 +155,7 @@ export const SESSION_TOKEN_COOKIE = "__Host-grok-auth.session_token";
 
 // Built separately so the `betterAuth({...})` call stays easy to edit without
 // breaking brackets (models often trip on the conditional plugin spread).
-const grokOAuthPlugin = authConfigured
+const grokOAuthPlugin = grokOAuthReady
   ? genericOAuth({
       config: GROK_PROVIDERS.map(({ providerId, idp }) => ({
         providerId,
@@ -180,6 +188,20 @@ export const auth = betterAuth({
   // See `trustedOrigins` construction above — must cover live preview hosts AND
   // local loopback variants, or clients get "Invalid origin".
   trustedOrigins,
+
+  // Brute-force protection on credential endpoints (OWASP: rate-limit login).
+  // Global ceiling is generous (normal API use); the credential paths are
+  // tightened so password guessing is impractical. Default storage is memory —
+  // enough for a single-operator desk behind one process.
+  rateLimit: {
+    enabled: true,
+    window: 60,
+    max: 100,
+    customRules: {
+      "/sign-in/email": { window: 60, max: 5 },
+      "/sign-up/email": { window: 3600, max: 10 },
+    },
+  },
 
   // Encrypt broker-issued OAuth tokens at rest, and treat the broker's upstreams
   // as trusted first-party identities. The broker owns identity and X emails are
@@ -251,3 +273,9 @@ export function readSessionToken(): string | null {
 // Re-exported for convenience; the array lives in the dependency-free
 // `providers.ts` so the client can import it too.
 export { GROK_PROVIDERS } from "./providers";
+
+// First-run operator bootstrap (email/password only). Runs once the DB is
+// ready; no-ops when no admin env vars are set or a user already exists.
+if (emailAndPasswordEnabled) {
+  void import("./bootstrap").then((m) => m.bootstrapAdmin());
+}

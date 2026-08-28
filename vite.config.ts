@@ -7,9 +7,11 @@ import { nitro } from "nitro/vite";
 // @ts-expect-error JS plugin alongside the TS vite config
 import { grokPwaPlugin } from "./scripts/grok-pwa-plugin.mjs";
 
-// Personal CRM: no Google / X / email gate. Must be set before plugins load so
-// both the client (`import.meta.env`) and the auth server (`process.env`) agree.
-process.env.VITE_AUTH_ENABLED = "false";
+// Default is the personal desk (auth off). Set `VITE_AUTH_ENABLED=true` in the
+// environment (or use `npm run build:auth`) to require a real login. Must be
+// settled before plugins load so the client (`import.meta.env`) and the auth
+// server (`process.env`) agree.
+process.env.VITE_AUTH_ENABLED ??= "false";
 
 /**
  * Finish PGLite bootstrap during dev-server setup (before traffic). Vite awaits
@@ -133,9 +135,6 @@ function authPopupPlugin(): Plugin {
 // The dev server starts once `src/router.tsx` and `src/routes/` exist — see
 // AGENTS.md § "First scaffold".
 export default defineConfig(({ command }) => ({
-  define: {
-    "import.meta.env.VITE_AUTH_ENABLED": JSON.stringify("false"),
-  },
   server: {
     host: "0.0.0.0",
     port: 8080,

@@ -14,6 +14,16 @@ export const bootstrapApp = createServerFn({ method: "GET" })
     return ops.bootstrapApp(context.userId);
   });
 
+/** Public: whether any operator account exists yet. Drives the first-run
+ * sign-up form (locked once the first account exists). No authMiddleware — it
+ * must be callable from the login wall while signed out. */
+export const firstRunFn = createServerFn({ method: "GET" }).handler(async () => {
+  const { getSql } = await import("@/lib/db");
+  const sql = await getSql();
+  const rows = await sql<{ n: number }>`select count(*)::int as n from "user"`;
+  return { hasUsers: (rows[0]?.n ?? 0) > 0 };
+});
+
 export const getSettingsFn = createServerFn({ method: "GET" })
   .middleware([authMiddleware])
   .handler(async ({ context }) => {

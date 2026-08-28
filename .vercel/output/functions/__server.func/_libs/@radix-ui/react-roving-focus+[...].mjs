@@ -1,6 +1,6 @@
 import { o as __toESM } from "../../_runtime.mjs";
 import { u as require_react } from "../@floating-ui/react-dom+[...].mjs";
-import { a as createContextScope, c as require_jsx_runtime, s as useComposedRefs, t as createCollection } from "./react-collection+[...].mjs";
+import { c as require_jsx_runtime, n as createContextScope, s as useComposedRefs, t as createCollection } from "./react-collection+[...].mjs";
 import { t as composeEventHandlers } from "../radix-ui__primitive.mjs";
 import { c as useControllableState, d as useId, f as useLayoutEffect2, h as Primitive, m as useCallbackRef } from "./react-dialog+[...].mjs";
 import { t as useDirection } from "../radix-ui__react-direction.mjs";

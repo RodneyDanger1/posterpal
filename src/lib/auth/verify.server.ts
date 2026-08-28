@@ -61,13 +61,16 @@ export async function getSessionUser(
 }
 
 /**
- * PosterPal is a personal CRM for one operator. There is no Google/X/email gate.
- * If a session exists we use it; otherwise the stable operator id `dev-user`.
+ * Resolve the operator id for the current request. When auth is OFF
+ * (`VITE_AUTH_ENABLED=false`) it always resolves the shared `dev-user`. When
+ * auth is ON it REQUIRES a valid session and throws `UnauthorizedError` (401)
+ * otherwise — there is no silent single-operator fallback on a public host.
  */
 export async function requireUserId(bearerToken?: string): Promise<string> {
   if (!authConfigured) return DEV_USER_ID;
   const user = await getSessionUser(bearerToken);
-  return user?.id ?? DEV_USER_ID;
+  if (!user) throw new UnauthorizedError();
+  return user.id;
 }
 
 void databaseConfigured;
