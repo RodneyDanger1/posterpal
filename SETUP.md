@@ -1,6 +1,6 @@
 # PosterPal setup
 
-PosterPal is a **personal desk**. There is no Google, X, or email sign-in. Open the app and work.
+PosterPal is a **personal desk**. Out of the box there is no sign-in: open the app and work. Self-hosts can require an **email/password login wall** instead — see [Self-host with Docker](#self-host-with-docker) below.
 
 Facebook is optional. Practice Pages work offline. Connect a Facebook app only when you want live publish, comment pull, and insights.
 
@@ -47,3 +47,60 @@ Page tokens come from `GET /v26.0/me/accounts`. The user must have **CREATE_CONT
 - Unpublished Facebook drafts are `published=false` with **no** `scheduled_publish_time`.
 - Reels must be **9:16**, **3–60 seconds**, minimum **540×960**.
 - Human-in-the-loop: AI may draft replies. You click Send. No auto-likes, auto-follows, auto-comments.
+
+## Self-host with Docker
+
+The fastest way to run PosterPal on a machine you control, with a real login wall.
+
+### 1. Prepare the secrets
+
+```bash
+cp .env.example .env
+# fill in at minimum:
+#   POSTGRES_PASSWORD        — the postgres superuser password for the compose DB
+#   BETTER_AUTH_SECRET       — 32+ random bytes (openssl rand -hex 32)
+#   POSTERPAL_MASTER_KEY     — 32+ random bytes (encrypts your Facebook tokens)
+#   POSTERPAL_ADMIN_EMAIL    — your login
+#   POSTERPAL_ADMIN_PASSWORD — a strong password (seeded on first boot)
+```
+
+### 2. Start the stack
+
+```bash
+docker compose up -d --build
+```
+
+This runs three services: **Postgres 17**, the **app** (Nitro server on :8080, migrations applied on boot), and the **worker** (fires due scheduled posts, syncs Graph, refreshes tokens — even when no browser tab is open).
+
+Open `http://localhost:8080` and sign in with `POSTERPAL_ADMIN_EMAIL` / `POSTERPAL_ADMIN_PASSWORD`.
+
+### 3. Put it behind HTTPS (required for Facebook)
+
+Facebook Login only accepts an HTTPS origin. Put a reverse proxy in front:
+
+- **Caddy** (simplest): `posterpal.example.com { reverse_proxy 127.0.0.1:8080 }` — TLS is automatic.
+- **Nginx**: standard `proxy_pass http://127.0.0.1:8080;` with a Let's Encrypt certificate.
+
+Both forward `X-Forwarded-For` by default — keep it on, the login rate limiter keys per client IP through it.
+
+Then set `BETTER_AUTH_URL=https://posterpal.example.com` in `.env` and `docker compose up -d` again, open Settings **on that URL**, and paste the shown App Domain / Site URL / Redirect URI into your Facebook App (see above).
+
+### 4. Backups
+
+```bash
+docker compose exec db pg_dump -U posterpal posterpal | gzip > posterpal_$(date +%F).sql.gz
+# restore:
+gunzip -c posterpal_YYYY-MM-DD.sql.gz | docker compose exec -T db psql -U posterpal posterpal
+```
+
+Or on a host with `pg_dump`: `bash scripts/backup.sh ./backups` (keeps the newest 14; `--restore <file>` restores).
+
+### 5. Health
+
+`GET /api/health` → `{"status":"ok","live":true,"db":"up"}`. The compose healthchecks use it; uptime monitors can too.
+
+### How the login wall works
+
+The `build:selfhost` image bakes `VITE_AUTH_ENABLED=true`. On the login screen, account creation is available **only while no operator exists** (first run) and locks afterwards; `POSTERPAL_ADMIN_EMAIL`/`POSTERPAL_ADMIN_PASSWORD` seed the first account at boot. Server functions reject unauthenticated calls with 401 — there is no silent fallback. Brute-force protection: 5 sign-in attempts/min, 10 sign-ups/hour.
+
+Run `npm run dev` (or `npm run build`) for the personal-desk mode with **no login** — that is still the default for localhost use.

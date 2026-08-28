@@ -245,6 +245,13 @@ export const auth = betterAuth({
       account_data: { name: "__Host-grok-auth.account_data" },
       dont_remember: { name: "__Host-grok-auth.dont_remember" },
     },
+    // Per-client rate-limit keying behind the documented reverse proxy
+    // (Caddy/Nginx set X-Forwarded-For; add cf-connecting-ip for CDN hosts).
+    // Without a resolvable IP Better Auth falls back to a shared per-path
+    // bucket — never silently disables the limiter.
+    ipAddress: {
+      ipAddressHeaders: ["x-forwarded-for", "x-real-ip", "cf-connecting-ip"],
+    },
   },
 
   plugins: [
