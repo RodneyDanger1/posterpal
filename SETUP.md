@@ -104,3 +104,14 @@ Or on a host with `pg_dump`: `bash scripts/backup.sh ./backups` (keeps the newes
 The `build:selfhost` image bakes `VITE_AUTH_ENABLED=true`. On the login screen, account creation is available **only while no operator exists** (first run) and locks afterwards; `POSTERPAL_ADMIN_EMAIL`/`POSTERPAL_ADMIN_PASSWORD` seed the first account at boot. Server functions reject unauthenticated calls with 401 — there is no silent fallback. Brute-force protection: 5 sign-in attempts/min, 10 sign-ups/hour.
 
 Run `npm run dev` (or `npm run build`) for the personal-desk mode with **no login** — that is still the default for localhost use.
+
+## Install on your phone or desktop (PWA)
+
+PosterPal is an installable Progressive Web App — no App Store, no APK sideloading, no build step.
+
+1. Open your PosterPal URL (an **HTTPS** origin, e.g. behind the reverse proxy above — install prompts require HTTPS, except on `localhost`).
+2. **iPhone/iPad (Safari):** Share → *Add to Home Screen*. **Android (Chrome):** ⋮ menu → *Install app* / *Add to Home screen*. **Desktop (Chrome/Edge):** the install icon in the address bar.
+3. It launches full-screen like a native app, with the PosterPal icon and its own window.
+
+The service worker caches only the app shell (never your data, tokens, or session), so an installed desk opens instantly and shows a graceful screen when offline — but every draft, publish, and sign-in still goes straight to the network. The phone still cannot auto-post: you tap **Publish**, same as the desktop. Pair a phone to an existing desk from **Settings → Devices**.
+
