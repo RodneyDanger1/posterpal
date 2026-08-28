@@ -87,6 +87,7 @@ function useComposerState() {
   const [imageProvider, setImageProvider] = useState("grok");
   const [variantLabel, setVariantLabel] = useState<string | null>(null);
   const [variantGroupId, setVariantGroupId] = useState<string | null>(null);
+  const [recycleDays, setRecycleDays] = useState("");
   const [settings, setSettings] = useState<SettingsBag | null>(null);
   const [alsoPageIds, setAlsoPageIds] = useState<string[]>([]);
   const [bestSlots, setBestSlots] = useState<HeatCell[]>([]);
@@ -203,6 +204,8 @@ function useComposerState() {
     setVariantLabel,
     variantGroupId,
     setVariantGroupId,
+    recycleDays,
+    setRecycleDays,
     settings,
     alsoPageIds,
     setAlsoPageIds,
@@ -564,6 +567,24 @@ function Composer() {
             ) : null}
           </div>
 
+          <div className="flex flex-wrap items-center gap-2">
+            <Hint label="Recycling: the background worker drafts a copy of this post for your approval this many days after it publishes. You review and schedule the copy — it never auto-posts.">
+              <label className="flex items-center gap-2 text-[12px] text-muted-foreground">
+                Recycle every
+                <Input
+                  type="number"
+                  min={1}
+                  max={365}
+                  className="w-20"
+                  value={s.recycleDays}
+                  placeholder="off"
+                  onChange={(e) => s.setRecycleDays(e.target.value)}
+                />
+                days
+              </label>
+            </Hint>
+          </div>
+
           <div className="flex flex-wrap gap-2">
             <Hint label="Runs the selected mode: publish, schedule, local draft, or Facebook draft.">
               <Button disabled={s.busy || (s.cadence?.level === "block" && s.mode !== "local-draft")} onClick={() => void submit(s, s.mode)}>
@@ -899,6 +920,10 @@ async function submit(s: ReturnType<typeof useComposerState>, mode: Mode) {
         variantLabel: s.variantLabel,
         variantGroupId: s.variantGroupId,
         alsoPageIds: s.alsoPageIds,
+        recycleAfterDays:
+          s.recycleDays.trim() === ""
+            ? null
+            : Math.max(1, Math.round(Number(s.recycleDays) || 0)) || null,
       },
     });
     const outcome = publishToast(result.status, result.warning);

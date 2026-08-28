@@ -17,6 +17,7 @@ import {
   saveAiKeysFn,
   saveFacebookApp,
   savePrefs,
+  saveRssFeedFn,
   startPractice,
   syncNowFn,
   updatePageVoiceFn,
@@ -42,6 +43,7 @@ function Settings() {
   const [warn, setWarn] = useState(8);
   const [block, setBlock] = useState(20);
   const [voice, setVoice] = useState("");
+  const [rssFeed, setRssFeed] = useState("");
   const [busy, setBusy] = useState(false);
   const pageId = useShellStore((s) => s.selectedPageId);
   const [openai, setOpenai] = useState("");
@@ -67,6 +69,7 @@ function Settings() {
   useEffect(() => {
     const p = pages.find((x) => x.id === pageId);
     setVoice(p?.brand_voice ?? "");
+    setRssFeed(p?.rss_feed_url ?? "");
   }, [pages, pageId]);
 
   return (
@@ -280,6 +283,39 @@ function Settings() {
           }}
         >
           Save voice
+        </Button>
+      </section>
+
+      <section className="rounded-xl bg-card p-4 shadow-card">
+        <h2 className="font-semibold">RSS auto-draft · selected Page</h2>
+        <p className="mt-1 text-[13px] text-muted-foreground">
+          Paste a blog or news feed URL. The background worker checks it and drafts the newest
+          items on this Page for your approval. Drafts only — nothing is published until you
+          review and schedule it. Leave blank to turn off.
+        </p>
+        <div className="mt-3 space-y-1">
+          <Label>Feed URL</Label>
+          <Input
+            type="url"
+            placeholder="https://example.com/feed.xml"
+            value={rssFeed}
+            onChange={(e) => setRssFeed(e.target.value)}
+          />
+        </div>
+        <Button
+          className="mt-3"
+          disabled={!pageId}
+          onClick={() => {
+            if (!pageId) return;
+            void saveRssFeedFn({ data: { pageId, feedUrl: rssFeed } })
+              .then(async () => {
+                toast.success(rssFeed.trim() ? "Feed saved. New items will be drafted for review." : "Feed cleared.");
+                setPages(await listPagesFn());
+              })
+              .catch((e: unknown) => toast.error(e instanceof Error ? e.message : "Save failed"));
+          }}
+        >
+          Save feed
         </Button>
       </section>
 

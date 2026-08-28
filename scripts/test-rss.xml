@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+<channel>
+  <title>Test Feed</title>
+  <link>http://localhost:8099</link>
+  <description>PosterPal RSS proof</description>
+  <item>
+    <title>RSS proof item — new river book arrives</title>
+    <link>http://localhost:8099/1</link>
+    <pubDate>Tue, 01 Sep 2026 16:00:00 GMT</pubDate>
+  </item>
+  <item>
+    <title>RSS proof item — tote sale weekend</title>
+    <link>http://localhost:8099/2</link>
+    <pubDate>Tue, 01 Sep 2026 17:00:00 GMT</pubDate>
+  </item>
+</channel>
+</rss>

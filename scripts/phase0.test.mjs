@@ -9,6 +9,7 @@ import { monetizationFitness } from "../src/lib/posterpal/operator.ts";
 import { carouselPartialWarning } from "../src/lib/posterpal/carousel.ts";
 import { facebookAppNameIssues } from "../src/lib/posterpal/facebook-names.ts";
 import { parseCsv } from "../src/lib/posterpal/csv.ts";
+import { parseRssItems } from "../src/lib/posterpal/rss.ts";
 
 // Regression tests for Surpass.md §8 (audit 2026-08-21) — the publish/reliability paths.
 
@@ -153,4 +154,21 @@ test("parseCsv: quoted commas, escaped quotes, CRLF, and blank-line skipping", (
   assert.equal(rows[1][0], "Staff pick, a novel on a train");
   assert.equal(rows[2][0], 'Say "hi" to the neighbors');
   assert.deepEqual(rows[3], ["Plain row without quotes"]);
+});
+
+test("parseRssItems: titles, CDATA, HTML stripping, and atom links", () => {
+  const xml = `<?xml version="1.0"?>
+<rss version="2.0"><channel>
+  <item><title>Plain &amp; simple</title><link>https://example.com/a</link><pubDate>Tue, 01 Sep 2026 16:00:00 GMT</pubDate></item>
+  <item><title><![CDATA[CDATA <b>bold</b> title]]></title><description>text</description></item>
+</channel></rss>`;
+  const items = parseRssItems(xml);
+  assert.equal(items.length, 2);
+  assert.equal(items[0].title, "Plain & simple");
+  assert.equal(items[0].link, "https://example.com/a");
+  assert.equal(items[0].pubDate, "Tue, 01 Sep 2026 16:00:00 GMT");
+  assert.equal(items[1].title, "CDATA bold title");
+
+  const atom = `<feed><entry><title>Atom entry</title><link href="https://example.com/b"/></entry></feed>`;
+  assert.equal(parseRssItems(atom)[0].title, "Atom entry");
 });

@@ -69,11 +69,13 @@ export async function saveAndDispatch(userId: string, input: ComposerInput) {
   await sql`
     insert into posts (
       id, user_id, page_id, message, link, first_comment, media_type, status,
-      scheduled_publish_time, created_by_this_app, ai_variant_label, variant_group_id
+      scheduled_publish_time, created_by_this_app, ai_variant_label, variant_group_id,
+      recycle_after_days
     ) values (
       ${id}, ${userId}, ${input.pageId}, ${input.message}, ${input.link ?? null},
       ${input.firstComment ?? null}, ${input.mediaType}, ${status}, ${scheduled},
-      true, ${input.variantLabel ?? null}, ${input.variantGroupId ?? null}
+      true, ${input.variantLabel ?? null}, ${input.variantGroupId ?? null},
+      ${input.recycleAfterDays ?? null}
     )
   `;
 
@@ -750,6 +752,76 @@ export async function tickScheduler(userId: string): Promise<number> {
     }
   }
   return n;
+}
+
+/**
+ * Recycling (HITL): for Published posts whose `recycle_after_days` has elapsed,
+ * draft a copy for the operator to approve and schedule. Never auto-publishes —
+ * the copy is a LocalDraft — and never duplicates when an identical draft or
+ * scheduled row already exists. Media is copied from the source post.
+ */
+export async function recycleDuePosts(userId: string): Promise<number> {
+  const sql = await getSql();
+  const candidates = await sql<{
+    id: string;
+    page_id: string;
+    message: string | null;
+    media_type: string;
+    recycle_after_days: number;
+  }>`
+    select id, page_id, message, media_type, recycle_after_days
+    from posts
+    where user_id = ${userId}
+      and status = 'Published'
+      and recycle_after_days is not null
+      and published_time is not null
+      and published_time < now() - make_interval(days => recycle_after_days)
+  `;
+  let created = 0;
+  for (const c of candidates) {
+    const msg = c.message ?? "";
+    // Skip when an identical copy is already queued (never spam the desk).
+    const dup = await sql<{ n: number }>`
+      select count(*)::int as n
+      from posts
+      where user_id = ${userId}
+        and page_id = ${c.page_id}
+        and message = ${msg}
+        and status in ('LocalDraft', 'LocalScheduled', 'FacebookScheduled', 'Publishing')
+    `;
+    if ((dup[0]?.n ?? 0) > 0) continue;
+
+    const newId = randomUUID();
+    await sql`
+      insert into posts (
+        id, user_id, page_id, message, media_type, status, created_by_this_app,
+        recycle_after_days
+      ) values (
+        ${newId}, ${userId}, ${c.page_id}, ${msg}, ${c.media_type}, 'LocalDraft', true,
+        ${c.recycle_after_days}
+      )
+    `;
+    await sql`
+      insert into content_items (
+        id, user_id, post_id, file_name, mime_type, media_kind, file_size, width,
+        height, duration_ms, alt_text, data_url, sort_order, created_with_ai
+      )
+      select
+        ${randomUUID()}, user_id, ${newId}, file_name, mime_type, media_kind, file_size,
+        width, height, duration_ms, alt_text, data_url, sort_order, created_with_ai
+      from content_items
+      where post_id = ${c.id} and user_id = ${userId}
+    `;
+    created += 1;
+    await recordLog({
+      userId,
+      postId: c.id,
+      status: "recycle_drafted",
+      error: `Recycle copy drafted for approval (${c.recycle_after_days}d).`,
+      path: "local-scheduler",
+    });
+  }
+  return created;
 }
 
 export async function policyForComposer(

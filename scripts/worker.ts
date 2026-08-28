@@ -14,7 +14,7 @@
  * Phase 1 (§7) of Surpass.md: "A desk that runs when the browser is closed."
  */
 import { getSql } from "../src/lib/db";
-import { tickScheduler } from "../src/lib/posterpal/publish";
+import { recycleDuePosts, tickScheduler } from "../src/lib/posterpal/publish";
 import { syncFromGraph } from "../src/lib/posterpal/sync";
 import { refreshVaultTokens } from "../src/lib/posterpal/facebook-oauth";
 
@@ -43,6 +43,19 @@ async function oneTick(operatorId: string): Promise<void> {
     results.push(`tick:${n}`);
   } catch (e) {
     results.push(`tick:FAILED(${e instanceof Error ? e.message : String(e)})`);
+  }
+  try {
+    const recycled = await recycleDuePosts(operatorId);
+    if (recycled > 0) results.push(`recycle:${recycled}`);
+  } catch (e) {
+    results.push(`recycle:FAILED(${e instanceof Error ? e.message : String(e)})`);
+  }
+  try {
+    const { rssDrafts } = await import("../src/lib/posterpal/ops");
+    const drafted = await rssDrafts(operatorId);
+    if (drafted > 0) results.push(`rss:${drafted}`);
+  } catch (e) {
+    results.push(`rss:FAILED(${e instanceof Error ? e.message : String(e)})`);
   }
   try {
     const sync = await syncFromGraph(operatorId);

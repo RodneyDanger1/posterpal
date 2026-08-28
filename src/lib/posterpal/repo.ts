@@ -134,6 +134,7 @@ function mapPage(r: Record<string, unknown>): PageRow {
     brand_voice: r.brand_voice == null ? null : String(r.brand_voice),
     cadence_warn_per_24h: Number(r.cadence_warn_per_24h ?? 8),
     cadence_block_per_24h: Number(r.cadence_block_per_24h ?? 20),
+    rss_feed_url: r.rss_feed_url == null ? null : String(r.rss_feed_url),
     created_at: String(r.created_at),
     updated_at: String(r.updated_at),
     has_token: asBool(r.has_token),

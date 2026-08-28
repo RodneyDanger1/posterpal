@@ -35,6 +35,7 @@ export type PageRow = {
   created_at: string;
   updated_at: string;
   has_token: boolean;
+  rss_feed_url: string | null;
 };
 
 export type PostRow = {
@@ -293,6 +294,9 @@ export type ComposerInput = {
   variantGroupId?: string | null;
   merchUrl?: string | null;
   alsoPageIds?: string[];
+  /** Recycling: the worker drafts a copy of this post this many days after it
+   * publishes (null = never). The copy is a LocalDraft for human approval. */
+  recycleAfterDays?: number | null;
   media?: Array<{
     fileName: string;
     mimeType?: string;

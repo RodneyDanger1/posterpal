@@ -166,6 +166,14 @@ export const bulkScheduleFn = createServerFn({ method: "POST" })
     return ops.bulkSchedule(context.userId, data.rows, data.defaultPageId);
   });
 
+export const saveRssFeedFn = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((d: { pageId: string; feedUrl: string }) => d)
+  .handler(async ({ context, data }) => {
+    const ops = await import("./ops");
+    return ops.saveRssFeed(context.userId, data);
+  });
+
 export const rescheduleFn = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
   .validator((d: { postId: string; scheduledAt: string }) => d)

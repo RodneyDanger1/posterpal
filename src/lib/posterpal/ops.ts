@@ -467,6 +467,65 @@ export async function bulkSchedule(
   };
 }
 
+/** RSS auto-post (HITL): for every Page with an rss_feed_url, fetch the newest
+ * items and draft ones not already on the desk. Drafts only — a human approves
+ * and schedules. Returns the number of new drafts. */
+export async function rssDrafts(userId: string): Promise<number> {
+  const sql = await getSql();
+  const feeds = await sql<{ page_id: string; rss_feed_url: string }>`
+    select id as page_id, rss_feed_url from pages
+    where user_id = ${userId} and rss_feed_url is not null and rss_feed_url <> ''
+  `;
+  if (feeds.length === 0) return 0;
+  const { fetchFeedItems } = await import("./rss");
+  let drafted = 0;
+  for (const feed of feeds) {
+    let items;
+    try {
+      items = await fetchFeedItems(feed.rss_feed_url);
+    } catch (e) {
+      await recordLog({
+        userId,
+        postId: "",
+        status: "rss_fetch_failed",
+        error: e instanceof Error ? e.message : String(e),
+        path: "rss",
+      });
+      continue;
+    }
+    for (const item of items) {
+      const message = item.link ? `${item.title}\n${item.link}` : item.title;
+      const dup = await sql<{ n: number }>`
+        select count(*)::int as n from posts
+        where user_id = ${userId} and page_id = ${feed.page_id} and message = ${message}
+      `;
+      if ((dup[0]?.n ?? 0) > 0) continue;
+      await sql`
+        insert into posts (id, user_id, page_id, message, media_type, status, created_by_this_app)
+        values (${randomUUID()}, ${userId}, ${feed.page_id}, ${message}, 'Text', 'LocalDraft', true)
+      `;
+      drafted += 1;
+      await recordLog({
+        userId,
+        postId: "",
+        status: "rss_drafted",
+        error: `Feed draft: ${item.title.slice(0, 80)}`,
+        path: "rss",
+      });
+    }
+  }
+  return drafted;
+}
+
+export async function saveRssFeed(userId: string, data: { pageId: string; feedUrl: string }) {
+  const sql = await getSql();
+  await sql`
+    update pages set rss_feed_url = ${data.feedUrl.trim() || null}
+    where id = ${data.pageId} and user_id = ${userId}
+  `;
+  return { ok: true };
+}
+
 export async function reschedule(userId: string, data: { postId: string; scheduledAt: string }) {
   const sql = await getSql();
   const post = await getPost(userId, data.postId);
