@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Guard } from "@/components/guard";
 import { PageHeader } from "@/components/page-header";
+import { BulkScheduler } from "@/components/bulk-scheduler";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -253,7 +254,12 @@ function Composer() {
       <PageHeader
         title="Composer"
         hint={`${s.selected.name}${s.selected.is_read_only ? " · analyze-only" : ""}. Ctrl+Enter sends the selected mode. Ctrl+S saves a local draft. Esc clears. Publish now hits Graph immediately. Schedule uses Facebook if the time is 10 minutes–30 days out; otherwise the local scheduler keeps it. Local draft never leaves this machine. Facebook draft is unpublished (published=false, no time) per the Pages API.`}
-      />
+      >
+        <BulkScheduler
+          pages={s.pages.map((p) => ({ id: p.id, name: p.name }))}
+          selectedPageId={s.selected.id}
+        />
+      </PageHeader>
       {s.pages.length > 1 ? (
         <div className="space-y-2">
           <label className="flex flex-wrap items-center gap-2 text-[13px]">

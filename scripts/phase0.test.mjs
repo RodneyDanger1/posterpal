@@ -8,6 +8,7 @@ import {
 import { monetizationFitness } from "../src/lib/posterpal/operator.ts";
 import { carouselPartialWarning } from "../src/lib/posterpal/carousel.ts";
 import { facebookAppNameIssues } from "../src/lib/posterpal/facebook-names.ts";
+import { parseCsv } from "../src/lib/posterpal/csv.ts";
 
 // Regression tests for Surpass.md §8 (audit 2026-08-21) — the publish/reliability paths.
 
@@ -136,4 +137,20 @@ test("facebookAppNameIssues: Notebook and MyBook are not Book-readings", () => {
   assert.deepEqual(facebookAppNameIssues("MyBook"), []);
   // Face at a word START is a Facebook reading (conservative): FaceID, FaceTime…
   assert.ok(facebookAppNameIssues("FaceID").length > 0);
+});
+
+test("parseCsv: quoted commas, escaped quotes, CRLF, and blank-line skipping", () => {
+  const text = [
+    "caption,when,page",
+    '"Staff pick, a novel on a train", 2026-09-01 16:00, North Shore Books',
+    '"Say ""hi"" to the neighbors", , Winona Weekend',
+    "",
+    "Plain row without quotes",
+  ].join(String.fromCharCode(13, 10));
+  const rows = parseCsv(text);
+  assert.equal(rows.length, 4);
+  assert.deepEqual(rows[0], ["caption", "when", "page"]);
+  assert.equal(rows[1][0], "Staff pick, a novel on a train");
+  assert.equal(rows[2][0], 'Say "hi" to the neighbors');
+  assert.deepEqual(rows[3], ["Plain row without quotes"]);
 });

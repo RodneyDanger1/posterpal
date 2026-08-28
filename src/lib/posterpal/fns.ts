@@ -153,6 +153,19 @@ export const publishNowFn = createServerFn({ method: "POST" })
     return ops.publishNow(context.userId, data.postId);
   });
 
+export const bulkScheduleFn = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator(
+    (d: {
+      rows: Array<{ message: string; when?: string | null; pageId?: string | null }>;
+      defaultPageId: string;
+    }) => d,
+  )
+  .handler(async ({ context, data }) => {
+    const ops = await import("./ops");
+    return ops.bulkSchedule(context.userId, data.rows, data.defaultPageId);
+  });
+
 export const rescheduleFn = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
   .validator((d: { postId: string; scheduledAt: string }) => d)

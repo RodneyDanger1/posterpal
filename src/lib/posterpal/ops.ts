@@ -384,6 +384,89 @@ export async function publishNow(userId: string, postId: string) {
   return publishExisting(userId, postId, "now");
 }
 
+/** Resolve a CSV row's page reference to a real page id: exact id match or
+ * case-insensitive name match. Returns null when the reference doesn't resolve. */
+async function resolvePageRef(userId: string, ref: string): Promise<string | null> {
+  const sql = await getSql();
+  const rows = await sql<{ id: string }>`
+    select id from pages
+    where user_id = ${userId}
+      and (id = ${ref} or lower(name) = lower(${ref}))
+    limit 1
+  `;
+  return rows[0]?.id ?? null;
+}
+
+/** Bulk CSV scheduling: every row goes through the SAME saveAndDispatch path as
+ * the composer, so policy + cadence are enforced server-side per row. Rows with
+ * a `when` become LocalScheduled; rows without become local drafts. A `pageId`
+ * column accepts either a page id or a case-insensitive page name. */
+export async function bulkSchedule(
+  userId: string,
+  rows: Array<{ message: string; when?: string | null; pageId?: string | null }>,
+  defaultPageId: string,
+) {
+  const results: Array<{ ok: boolean; caption: string; status?: string; error?: string }> = [];
+  for (const row of rows) {
+    const caption = (row.message ?? "").trim();
+    if (!caption) {
+      results.push({ ok: false, caption: "", error: "Empty caption row." });
+      continue;
+    }
+    try {
+      const when = row.when?.trim() || null;
+      let scheduledAt: string | null = null;
+      if (when) {
+        const t = new Date(when);
+        if (Number.isNaN(t.getTime())) {
+          results.push({
+            ok: false,
+            caption,
+            error: `Unparseable date "${when}" — use YYYY-MM-DD HH:MM.`,
+          });
+          continue;
+        }
+        scheduledAt = t.toISOString();
+      }
+      let pageId = defaultPageId;
+      if (row.pageId?.trim()) {
+        const resolved = await resolvePageRef(userId, row.pageId.trim());
+        if (!resolved) {
+          results.push({ ok: false, caption, error: `Unknown Page "${row.pageId.trim()}".` });
+          continue;
+        }
+        pageId = resolved;
+      }
+      const result = await saveAndDispatch(userId, {
+        pageId,
+        message: caption,
+        mediaType: "Text",
+        mode: scheduledAt ? "schedule" : "local-draft",
+        scheduledAt,
+      });
+      results.push({
+        ok: true,
+        caption,
+        status: result.status,
+        ...(result.warning ? { error: result.warning } : {}),
+      });
+    } catch (e) {
+      results.push({ ok: false, caption, error: e instanceof Error ? e.message : String(e) });
+    }
+  }
+  const ok = results.filter((r) => r.ok).length;
+  const failed = results.length - ok;
+  return {
+    ok,
+    failed,
+    total: results.length,
+    results,
+    warning: failed
+      ? `${failed} of ${results.length} row${results.length === 1 ? "" : "s"} failed — see details.`
+      : null,
+  };
+}
+
 export async function reschedule(userId: string, data: { postId: string; scheduledAt: string }) {
   const sql = await getSql();
   const post = await getPost(userId, data.postId);
