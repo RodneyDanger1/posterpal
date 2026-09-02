@@ -36,6 +36,8 @@ export type PageRow = {
   updated_at: string;
   has_token: boolean;
   rss_feed_url: string | null;
+  picture_url: string | null;
+  posting_slots_json: string | null;
 };
 
 export type PostRow = {
@@ -162,6 +164,10 @@ export type CadenceResult = {
   warnAt: number;
   blockAt: number;
   level: "ok" | "warn" | "block";
+  reelLast24h: number;
+  reelWarnAt: number;
+  reelBlockAt: number;
+  reelLevel: "ok" | "warn" | "block";
 };
 
 export type ContentAnalysis = {
@@ -194,6 +200,8 @@ export type SettingsBag = {
   facebookLastRedirect: string | null;
   facebookConnected: boolean;
   livePageCount: number;
+  hidePractice: boolean;
+  timezone: string | null;
 };
 
 export type PageMetrics = {
@@ -203,6 +211,17 @@ export type PageMetrics = {
   merchCount: number;
   inboxCount: number;
   postedLast24h: number;
+  dueCount: number;
+  uniqueness: number;
+  lastPublishedAt: string | null;
+  nextScheduledAt: string | null;
+};
+
+export type CollisionHit = {
+  pageA: string;
+  pageB: string;
+  score: number;
+  excerpt: string;
 };
 
 export type HomeSnapshot = {
@@ -218,6 +237,8 @@ export type HomeSnapshot = {
   mix: { Text: number; Photo: number; Carousel: number; Video: number; Reel: number; Story: number };
   pageMetrics: Record<string, PageMetrics>;
   needs: NeedsItem[];
+  collisions: CollisionHit[];
+  week: Array<{ iso: string; label: string; weekday: string; scheduled: number; published: number; isToday: boolean }>;
 };
 
 export type NeedsItem = {
@@ -241,6 +262,47 @@ export type ResearchNote = {
   confidence: "verified" | "unverified";
 };
 
+export type AgentHop = {
+  id: string;
+  kind:
+    | "composer"
+    | "schedule"
+    | "later"
+    | "inbox"
+    | "drafts"
+    | "vault"
+    | "failed"
+    | "calendar"
+    | "merch"
+    | "settings"
+    | "analytics"
+    | "media"
+    | "pair"
+    | "connect"
+    | "home";
+  label: string;
+  href: string;
+  caption?: string;
+  commentId?: string;
+  postId?: string;
+  ideaId?: string;
+};
+
+export type AgentInboxDraft = {
+  commentId: string;
+  author: string;
+  comment: string;
+  pageName: string;
+  pageId: string;
+  buyingIntent: boolean;
+  drafts: string[];
+};
+
+export type AgentCaptionPolicy = {
+  canPublish: boolean;
+  flags: Array<{ id: string; severity: string; title: string }>;
+};
+
 export type AgentResult = {
   summary: string;
   sources: AgentSource[];
@@ -254,6 +316,14 @@ export type AgentResult = {
   queries: string[];
   notes: ResearchNote[];
   pagePurpose: string;
+  opsBrief: string;
+  hops: AgentHop[];
+  inboxDrafts: AgentInboxDraft[];
+  captionPolicy: AgentCaptionPolicy | null;
+  nextSlot: string | null;
+  merchUrl: string | null;
+  persona: string;
+  skills: string[];
   profile: {
     pageId: string;
     name: string;
@@ -318,6 +388,8 @@ export type MediaLibraryItem = {
   page_name: string;
   mime_type: string | null;
   created_with_ai: boolean;
+  created_at?: string;
+  provider?: string | null;
 };
 
 export type AnalyticsPoint = {

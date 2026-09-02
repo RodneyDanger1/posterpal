@@ -5,6 +5,7 @@ const ROWS = [
   ["Ctrl + Enter", "Send from Composer (selected mode)"],
   ["Ctrl + S", "Save a local draft"],
   ["Esc", "Clear Composer (when not typing)"],
+  ["N", "New post in Composer"],
   ["J / K", "Move inbox selection"],
   ["E", "Mark inbox comment handled"],
   ["?", "This cheat sheet"],

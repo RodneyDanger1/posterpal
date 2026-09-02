@@ -8,15 +8,17 @@ import {
   GraphRequestError,
   graphFetch,
   graphMultipart,
+  graphOperatorMessage,
   graphObjectId,
   ruploadBinary,
   unixSeconds,
   type PublishMode,
 } from "./graph";
-import { cadenceForPage, getPage, getPageToken, getSetting, recordLog, recordQuota } from "./repo";
+import { cadenceForPage, getPage, getPageToken, getSetting, listMerch, recordLog, recordQuota } from "./repo";
 import { runPolicyChecklist, validateReel } from "./policy";
 import { listContent } from "./repo";
 import { carouselPartialWarning } from "./carousel";
+import { remixCaption } from "./briefing";
 import type { ComposerInput, ContentItemRow } from "./types";
 
 export async function saveAndDispatch(userId: string, input: ComposerInput) {
@@ -32,6 +34,11 @@ export async function saveAndDispatch(userId: string, input: ComposerInput) {
       `Cadence hard cap: ${cadence.postedLast24h} posts in 24h (cap ${cadence.blockAt}). Wait before publishing.`,
     );
   }
+  if (input.mediaType === "Reel" && input.mode !== "local-draft" && cadence.reelLevel === "block") {
+    throw new Error(
+      `Reels API cap: ${cadence.reelLast24h} API Reels in 24h (Meta cap ${cadence.reelBlockAt}). Wait before publishing or scheduling another.`,
+    );
+  }
 
   if (input.mediaType === "Reel" && input.media?.[0]) {
     const reelErr = validateReel(input.media[0]);
@@ -45,6 +52,8 @@ export async function saveAndDispatch(userId: string, input: ComposerInput) {
       hasImages: (input.media?.length ?? 0) > 0,
       missingAlt: (input.media ?? []).some((m) => !m.altText?.trim()),
       createdWithAi: (input.media ?? []).some((m) => Boolean(m.createdWithAi)),
+      mediaType: input.mediaType,
+      reelLast24h: input.mediaType === "Reel" ? cadence.reelLast24h : undefined,
     });
     if (!policy.canPublish) {
       const block = policy.flags.find((f) => f.severity === "block");
@@ -117,7 +126,7 @@ export async function saveAndDispatch(userId: string, input: ComposerInput) {
     }
     const slot = scheduled ?? "";
     const when = new Date(slot);
-    const windowNote = facebookScheduleWindow(when);
+    const windowNote = facebookScheduleWindow(when, new Date(), input.mediaType);
     if (windowNote) {
       await recordLog({ userId, postId: id, status: "local_schedule", error: windowNote, path: "local-scheduler" });
       return {
@@ -167,8 +176,15 @@ async function resolveCommentTarget(graphId: string, token: string, appSecret: s
 
 export async function publishExisting(userId: string, postId: string, mode: PublishMode = "now") {
   const sql = await getSql();
-  const posts = await sql<{ id: string; page_id: string; status: string; message: string | null; link: string | null }>`
-    select id, page_id, status, message, link from posts where user_id = ${userId} and id = ${postId}
+  const posts = await sql<{
+    id: string;
+    page_id: string;
+    status: string;
+    message: string | null;
+    link: string | null;
+    media_type: string;
+  }>`
+    select id, page_id, status, message, link, media_type from posts where user_id = ${userId} and id = ${postId}
   `;
   const row = posts[0];
   if (!row) throw new Error("Post not found");
@@ -178,13 +194,23 @@ export async function publishExisting(userId: string, postId: string, mode: Publ
       `Cadence hard cap: ${cadence.postedLast24h} posts in 24h (cap ${cadence.blockAt}). Wait before publishing.`,
     );
   }
+  if (row.media_type === "Reel" && cadence.reelLevel === "block") {
+    throw new Error(
+      `Reels API cap: ${cadence.reelLast24h} API Reels in 24h (Meta cap ${cadence.reelBlockAt}). Wait before publishing or scheduling another.`,
+    );
+  }
   const media = await listContent(userId, postId);
+  const merch = await listMerch(userId, row.page_id);
+  const hay = `${row.message ?? ""} ${row.link ?? ""}`;
+  const merchUrl = merch.find((m) => m.url && hay.includes(m.url))?.url ?? null;
   const policy = await policyForComposer(userId, row.page_id, String(row.message ?? ""), {
     link: row.link,
-    merchUrl: null,
+    merchUrl,
     hasImages: media.length > 0,
     missingAlt: media.some((m) => !m.alt_text?.trim()),
     createdWithAi: media.some((m) => Boolean(m.created_with_ai)),
+    mediaType: row.media_type,
+    reelLast24h: row.media_type === "Reel" ? cadence.reelLast24h : undefined,
   });
   if (!policy.canPublish) {
     const block = policy.flags.find((f) => f.severity === "block");
@@ -277,6 +303,16 @@ export async function attemptGraphPublish(
     const payload = buildFeedPublishPayload({ message, link, mode, scheduledUnix });
     const mediaType = String(post.media_type);
     const ctx = { token, appSecret, fbPageId, message, payload, mode, scheduledUnix };
+    const graphPath =
+      mediaType === "Reel"
+        ? `/${fbPageId}/video_reels`
+        : mediaType === "Photo"
+          ? `/${fbPageId}/photos`
+          : mediaType === "Video"
+            ? `/${fbPageId}/videos`
+            : mediaType === "Story"
+              ? `/${fbPageId}/photo_stories`
+              : `/${fbPageId}/feed`;
 
     let graphId: string | undefined;
     let carouselDropped: string[] = [];
@@ -300,6 +336,18 @@ export async function attemptGraphPublish(
         appSecret,
         form: { ...payload },
       });
+      if (res.quota) {
+        await recordQuota(userId, pageId, res.quota);
+        if ((res.quota.callCountPct ?? 0) >= 80) {
+          const { deskLog } = await import("./log");
+          await deskLog({
+            level: "warn",
+            scope: "graph.quota",
+            userId,
+            message: `Graph usage ${res.quota.callCountPct}% on ${res.quota.sourceHeader}`,
+          });
+        }
+      }
       graphId = graphObjectId(res.data);
     }
 
@@ -332,7 +380,7 @@ export async function attemptGraphPublish(
       userId,
       postId,
       status: `graph_${mode}`,
-      path: `/${fbPageId}/feed`,
+      path: graphPath,
       durationMs: Date.now() - started,
     });
 
@@ -365,8 +413,28 @@ export async function attemptGraphPublish(
     };
   } catch (err) {
     const mapped = err instanceof GraphRequestError ? err.mapped : null;
+    const failText = mapped ? graphOperatorMessage(mapped, String(err)) : err instanceof Error ? err.message : String(err);
     if (err instanceof GraphRequestError && err.quota) {
       await recordQuota(userId, pageId, err.quota);
+      if ((err.quota.callCountPct ?? 0) >= 80) {
+        const { deskLog } = await import("./log");
+        await deskLog({
+          level: "warn",
+          scope: "graph.quota",
+          userId,
+          message: `Graph usage ${err.quota.callCountPct}% on ${err.quota.sourceHeader} (call failed)`,
+        });
+      }
+    }
+    if (mapped) {
+      const { deskLog } = await import("./log");
+      await deskLog({
+        level: mapped.retryable ? "warn" : "error",
+        scope: "graph.publish",
+        userId,
+        message: failText,
+        extra: { kind: mapped.kind, code: mapped.code, subcode: mapped.subcode, fbtrace: mapped.fbtraceId, postId },
+      });
     }
     if (
       mode === "schedule" &&
@@ -374,39 +442,39 @@ export async function attemptGraphPublish(
         (mapped?.kind === "invalid_param" && /schedul/i.test(mapped.message)))
     ) {
       await sql`
-        update posts set status = 'LocalScheduled', error_message = ${mapped.message}, updated_at = now()
+        update posts set status = 'LocalScheduled', error_message = ${failText}, updated_at = now()
         where id = ${postId} and user_id = ${userId}
       `;
       await recordLog({
         userId,
         postId,
         status: "fallback_local_schedule",
-        error: mapped.message,
+        error: failText,
         graphCode: mapped.code,
         durationMs: Date.now() - started,
       });
-      return { status: "LocalScheduled", warning: mapped.message + " Saved on the local scheduler." };
+      return { status: "LocalScheduled", warning: failText + " Saved on the local scheduler." };
     }
     if (mode === "fb-draft") {
       await sql`
-        update posts set status = 'LocalDraft', error_message = ${mapped?.message ?? String(err)}, updated_at = now()
+        update posts set status = 'LocalDraft', error_message = ${failText}, updated_at = now()
         where id = ${postId} and user_id = ${userId}
       `;
       await recordLog({
         userId,
         postId,
         status: "fb_draft_fallback",
-        error: mapped?.message ?? String(err),
+        error: failText,
         graphCode: mapped?.code ?? null,
         durationMs: Date.now() - started,
       });
       return { status: "LocalDraft", warning: "Facebook draft not supported on this Page. Saved locally." };
     }
-    await failPost(userId, postId, mapped?.message ?? String(err), started, mapped ? String(mapped.code) : "graph", mapped?.code);
+    await failPost(userId, postId, failText, started, mapped ? String(mapped.code) : "graph", mapped?.code);
     if (mapped?.kind === "token") {
       await sql`update token_vault set is_valid = false where user_id = ${userId}`;
     }
-    return { status: "Failed", warning: mapped?.message ?? String(err) };
+    return { status: "Failed", warning: failText };
   }
 }
 
@@ -715,17 +783,18 @@ export async function tickScheduler(userId: string): Promise<number> {
       await attemptGraphPublish(userId, row.id, "now");
       n += 1;
     } catch (e) {
-      await failPost(
-        userId,
-        row.id,
-        e instanceof Error ? e.message : String(e),
-        Date.now(),
-        "scheduler",
-      );
+      const { GraphRequestError, graphOperatorMessage } = await import("./graph");
+      const msg =
+        e instanceof GraphRequestError
+          ? graphOperatorMessage(e.mapped)
+          : e instanceof Error
+            ? e.message
+            : String(e);
+      await failPost(userId, row.id, msg, Date.now(), "scheduler", e instanceof GraphRequestError ? e.mapped.code : undefined);
     }
   }
-  const dueGraph = await sql<{ id: string; scheduled_publish_time: string }>`
-    select id, scheduled_publish_time from posts
+  const dueGraph = await sql<{ id: string; scheduled_publish_time: string; media_type: string }>`
+    select id, scheduled_publish_time, media_type from posts
     where user_id = ${userId}
       and status = 'LocalScheduled'
       and scheduled_publish_time is not null
@@ -735,17 +804,28 @@ export async function tickScheduler(userId: string): Promise<number> {
     limit 8
   `;
   for (const row of dueGraph) {
-    const note = facebookScheduleWindow(new Date(row.scheduled_publish_time));
+    const note = facebookScheduleWindow(new Date(row.scheduled_publish_time), new Date(), row.media_type);
     if (!note) {
       try {
+        const claimed = await sql<{ id: string }>`
+          update posts set status = 'Publishing', updated_at = now()
+          where id = ${row.id} and user_id = ${userId} and status = 'LocalScheduled'
+          returning id
+        `;
+        if (!claimed[0]) continue;
         await attemptGraphPublish(userId, row.id, "schedule");
         n += 1;
       } catch (e) {
+        await sql`
+          update posts set status = 'LocalScheduled', updated_at = now()
+          where id = ${row.id} and user_id = ${userId} and status = 'Publishing'
+        `;
         await recordLog({
           userId,
           postId: row.id,
           status: "scheduler_push_failed",
-          error: e instanceof Error ? e.message : String(e),
+          error: e instanceof GraphRequestError ? graphOperatorMessage(e.mapped) : e instanceof Error ? e.message : String(e),
+          graphCode: e instanceof GraphRequestError ? e.mapped.code : null,
           path: "local-scheduler",
         });
       }
@@ -781,12 +861,13 @@ export async function recycleDuePosts(userId: string): Promise<number> {
   for (const c of candidates) {
     const msg = c.message ?? "";
     // Skip when an identical copy is already queued (never spam the desk).
+    const remixed = remixCaption(msg);
     const dup = await sql<{ n: number }>`
       select count(*)::int as n
       from posts
       where user_id = ${userId}
         and page_id = ${c.page_id}
-        and message = ${msg}
+        and message in (${msg}, ${remixed})
         and status in ('LocalDraft', 'LocalScheduled', 'FacebookScheduled', 'Publishing')
     `;
     if ((dup[0]?.n ?? 0) > 0) continue;
@@ -797,21 +878,47 @@ export async function recycleDuePosts(userId: string): Promise<number> {
         id, user_id, page_id, message, media_type, status, created_by_this_app,
         recycle_after_days
       ) values (
-        ${newId}, ${userId}, ${c.page_id}, ${msg}, ${c.media_type}, 'LocalDraft', true,
+        ${newId}, ${userId}, ${c.page_id}, ${remixed}, ${c.media_type}, 'LocalDraft', true,
         ${c.recycle_after_days}
       )
     `;
+    // One-shot on the source so a later publish of the remix does not spawn
+    // another identical draft every tick. The new draft keeps recycle_after_days.
     await sql`
-      insert into content_items (
-        id, user_id, post_id, file_name, mime_type, media_kind, file_size, width,
-        height, duration_ms, alt_text, data_url, sort_order, created_with_ai
-      )
-      select
-        ${randomUUID()}, user_id, ${newId}, file_name, mime_type, media_kind, file_size,
-        width, height, duration_ms, alt_text, data_url, sort_order, created_with_ai
+      update posts set recycle_after_days = null, updated_at = now()
+      where id = ${c.id} and user_id = ${userId}
+    `;
+    const items = await sql<{
+      file_name: string;
+      mime_type: string | null;
+      media_kind: string;
+      file_size: number | null;
+      width: number | null;
+      height: number | null;
+      duration_ms: number | null;
+      alt_text: string | null;
+      data_url: string | null;
+      sort_order: number;
+      created_with_ai: boolean;
+    }>`
+      select file_name, mime_type, media_kind, file_size, width, height, duration_ms,
+             alt_text, data_url, sort_order, created_with_ai
       from content_items
       where post_id = ${c.id} and user_id = ${userId}
     `;
+    for (const item of items) {
+      await sql`
+        insert into content_items (
+          id, user_id, post_id, file_name, mime_type, media_kind, file_size, width,
+          height, duration_ms, alt_text, data_url, sort_order, created_with_ai
+        ) values (
+          ${randomUUID()}, ${userId}, ${newId}, ${item.file_name}, ${item.mime_type},
+          ${item.media_kind}, ${item.file_size}, ${item.width}, ${item.height},
+          ${item.duration_ms}, ${item.alt_text}, ${item.data_url}, ${item.sort_order},
+          ${item.created_with_ai}
+        )
+      `;
+    }
     created += 1;
     await recordLog({
       userId,
@@ -828,7 +935,15 @@ export async function policyForComposer(
   userId: string,
   pageId: string,
   message: string,
-  opts: { link?: string | null; merchUrl?: string | null; hasImages: boolean; missingAlt: boolean; createdWithAi: boolean },
+  opts: {
+    link?: string | null;
+    merchUrl?: string | null;
+    hasImages: boolean;
+    missingAlt: boolean;
+    createdWithAi: boolean;
+    mediaType?: string;
+    reelLast24h?: number;
+  },
 ) {
   const sql = await getSql();
   const recent = await sql<{ id: string; message: string | null; reactions_count: number; comments_count: number; shares_count: number }>`
@@ -839,6 +954,17 @@ export async function policyForComposer(
     order by created_at desc
     limit 30
   `;
+  const other = await sql<{ id: string; message: string | null; page_name: string }>`
+    select po.id, po.message, pa.name as page_name
+    from posts po
+    join pages pa on pa.id = po.page_id
+    where po.user_id = ${userId}
+      and po.page_id <> ${pageId}
+      and po.message is not null
+      and po.status in ('Published','FacebookScheduled','LocalScheduled','Publishing','FacebookDraft','LocalDraft')
+    order by po.created_at desc
+    limit 80
+  `;
   return runPolicyChecklist({
     message,
     link: opts.link,
@@ -846,10 +972,16 @@ export async function policyForComposer(
     hasImages: opts.hasImages,
     missingAlt: opts.missingAlt,
     createdWithAi: opts.createdWithAi,
+    reelLast24h: opts.mediaType === "Reel" ? opts.reelLast24h : undefined,
     recentMessages: recent.map((r) => ({
       id: r.id,
       message: r.message ?? "",
       engagement: r.reactions_count + r.comments_count + r.shares_count,
+    })),
+    otherPageMessages: other.map((r) => ({
+      id: r.id,
+      message: r.message ?? "",
+      pageName: r.page_name,
     })),
   });
 }

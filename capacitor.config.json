@@ -1,0 +1,15 @@
+{
+  "appId": "com.posterpal.desk",
+  "appName": "PosterPal",
+  "webDir": "mobile-www",
+  "server": {
+    "androidScheme": "http",
+    "cleartext": true,
+    "allowNavigation": ["http://*", "https://*"]
+  },
+  "android": {
+    "allowMixedContent": true,
+    "backgroundColor": "#1877F2",
+    "webContentsDebuggingEnabled": true
+  }
+}

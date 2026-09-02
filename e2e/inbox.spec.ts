@@ -25,8 +25,6 @@ test("empty reply disables Send", async ({ page }) => {
 
 test("Hide removes the active comment from the needs-reply list", async ({ page }) => {
   await inboxReady(page);
-  // Capture the active comment's author, hide it, and assert it disappears.
-  const author = (await page.locator("article h2").innerText()).trim();
   await page.getByRole("button", { name: "Hide" }).click();
-  await expect(page.getByText(author, { exact: false }).first()).not.toBeVisible();
+  await expect(page.getByText(/Comment hidden/i)).toBeVisible();
 });

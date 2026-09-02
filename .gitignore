@@ -12,6 +12,13 @@ dist/
 *.log
 .DS_Store
 artifacts/
+android/app/build/
+android/.gradle/
+android/local.properties
+android/capacitor-cordova-android-plugins/build/
+release/
+.tools/
+.posterpal-smoke/
 
 # Playwright output
 test-results/

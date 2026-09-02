@@ -10,6 +10,7 @@ import {
   facebookStatusFn,
   getSettingsFn,
   saveFacebookApp,
+  startFleetPracticeFn,
   startPractice,
 } from "@/lib/posterpal/fns";
 import { connectFacebookPopup, facebookCallbackUri } from "@/lib/posterpal/connect-client";
@@ -73,7 +74,8 @@ function SetupWizard() {
     setBusy(true);
     try {
       await startPractice();
-      toast.success("Practice Pages are ready.");
+      await startFleetPracticeFn();
+      toast.success("Ten unique practice Pages are ready.");
       void navigate({ to: "/" });
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Could not seed practice workspace");
@@ -104,9 +106,16 @@ function SetupWizard() {
         >
           <ol className="list-decimal space-y-2 pl-5 text-sm text-muted-foreground">
             <li>Valid OAuth Redirect URI (this app): <code className="rounded bg-muted px-1 text-foreground">{redirect || `${typeof window !== "undefined" ? window.location.origin : ""}/api/facebook/callback`}</code></li>
-            <li>Desktop WPF build uses the loopback URI <code className="rounded bg-muted px-1 text-foreground">http://127.0.0.1:55443/callback/</code></li>
+            <li>Windows app uses <code className="rounded bg-muted px-1 text-foreground">http://127.0.0.1:8080/api/facebook/callback</code>. The phone never does Facebook Login.</li>
             <li>Permissions: {REQUIRED_SCOPES.join(", ")}</li>
             <li>Page tokens come from <code className="rounded bg-muted px-1">/me/accounts</code>. CREATE_CONTENT is required to publish; ANALYZE-only Pages import as read-only.</li>
+            <li>
+              <strong className="text-foreground">Starting 10 unique Pages:</strong> Graph cannot create Pages. Create each at{" "}
+              <a className="underline" href="https://www.facebook.com/pages/creation/" target="_blank" rel="noreferrer">
+                facebook.com/pages/creation
+              </a>{" "}
+              with a distinct name, category, about, and profile art. Add yourself as Admin. One Connect imports all of them. Identical captions across those Pages are blocked here on purpose.
+            </li>
           </ol>
           <div className="mt-4">
             <FacebookDomainHelp />
@@ -114,8 +123,11 @@ function SetupWizard() {
           <FacebookNameHelp />
           <div className="mt-5 flex flex-wrap gap-2">
             <Button onClick={() => setStep(2)}>I have an App ID</Button>
+            <Button variant="outline" onClick={() => void navigate({ to: "/connect" })}>
+              Open the Connect coach
+            </Button>
             <Button variant="outline" onClick={() => void practice()} disabled={busy}>
-              Skip — start with practice Pages
+              Skip — start with 10 unique practice Pages
             </Button>
           </div>
         </Panel>
@@ -163,6 +175,12 @@ function SetupWizard() {
 
       {step === 4 ? (
         <Panel title="You are in" body="Optional: add AI later in Settings. Captions, hashtags, and reply drafts use Grok when the platform key is present — they never auto-send comments.">
+          <ol className="list-decimal space-y-1.5 pl-5 text-sm text-muted-foreground">
+            <li>Give each Page a voice in Settings so captions stay unique.</li>
+            <li>Add a merch URL per Page if you sell anything. Composer can UTM it.</li>
+            <li>Schedule from Composer. The EXE ticker fires LocalScheduled every 60s while PosterPal is open.</li>
+            <li>Phone APK is a viewer of this desk on Wi‑Fi. Facebook Login stays on the PC.</li>
+          </ol>
           <div className="mt-5 flex gap-2">
             <Button onClick={() => void finish()}>Open PosterPal</Button>
           </div>

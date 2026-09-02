@@ -5,6 +5,7 @@ import { PosterPalMark } from "@/components/app-shell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { setDeviceToken } from "@/lib/auth/client";
 
 export const Route = createFileRoute("/pair")({ component: PairPhone });
 
@@ -39,12 +40,8 @@ function PairPhone() {
               .then(async (r) => {
                 const body = (await r.json()) as { token?: string; error?: string };
                 if (!r.ok || !body.token) throw new Error(body.error || "Pairing failed");
-                try {
-                  localStorage.setItem("posterpal-device-token", body.token);
-                } catch {
-                  /* iframe / cookie-blocked */
-                }
-                toast.success("Paired. Same desk, same data.");
+                setDeviceToken(body.token);
+                toast.success("Paired. This device now uses the same Pages, drafts, and inbox.");
                 void navigate({ to: "/" });
               })
               .catch((err: unknown) => toast.error(err instanceof Error ? err.message : "Pairing failed"))

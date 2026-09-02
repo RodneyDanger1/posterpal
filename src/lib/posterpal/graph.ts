@@ -47,9 +47,12 @@ export type GraphErrorMapped = {
     | "abusive"
     | "invalid_param"
     | "unknown_schedule"
+    | "duplicate"
     | "server"
     | "other";
   retryable: boolean;
+  operatorHint: string;
+  fbtraceId?: string;
 };
 
 export function mapGraphError(input: {
@@ -57,23 +60,85 @@ export function mapGraphError(input: {
   code?: number;
   errorSubcode?: number;
   message?: string;
+  userMessage?: string;
+  fbtraceId?: string;
 }): GraphErrorMapped {
   const code = input.code ?? 0;
-  const message = input.message ?? `Graph error ${input.httpStatus}`;
-  if (code === 190) return { code, message, kind: "token", retryable: false };
-  if (code === 200) return { code, message, kind: "permission", retryable: false };
-  if (code === 4 || code === 17 || code === 32 || code === 613 || code === 80001) {
-    return { code, message, kind: "rate_limit", retryable: true };
+  const subcode = input.errorSubcode;
+  const raw = [input.message, input.userMessage].filter(Boolean).join(" — ") || `Graph error ${input.httpStatus}`;
+  const hint = (kind: GraphErrorMapped["kind"], retryable: boolean, operatorHint: string): GraphErrorMapped => ({
+    code,
+    subcode,
+    message: raw,
+    kind,
+    retryable,
+    operatorHint,
+    fbtraceId: input.fbtraceId,
+  });
+
+  if (code === 190 || code === 459 || code === 102) {
+    return hint("token", false, "Reconnect Facebook in Settings. Long-lived user tokens last ~60 days; Page tokens are re-derived from /me/accounts.");
   }
-  if (code === 368) return { code, message, kind: "abusive", retryable: false };
-  if (code === 100) return { code, message, kind: "invalid_param", retryable: false };
-  if (code === 1 && /schedul/i.test(message)) {
-    return { code, message, kind: "unknown_schedule", retryable: false };
+  if (code === 492) {
+    return hint("permission", false, "This user is not an admin with CREATE_CONTENT on that Page. Reconnect after the role is fixed on facebook.com.");
+  }
+  if (code === 10 || (code >= 200 && code <= 299)) {
+    return hint("permission", false, "A required Page permission is missing or was revoked. Connect again (rerequest) in Settings.");
+  }
+  if (code === 104) {
+    return hint("invalid_param", false, "appsecret_proof failed. Paste the App Secret in Settings — a blank save does not clear a stored secret.");
+  }
+  if (code === 4 || code === 17) {
+    return hint("rate_limit", true, "Platform rate limit (X-App-Usage). Wait, then retry. Do not spray retries.");
+  }
+  if (code === 32 || code === 80001) {
+    return hint("rate_limit", true, "Page rate limit (~4800 × engaged users / 24h on X-Business-Use-Case-Usage). Pause this Page, then retry.");
+  }
+  if (code === 613) {
+    return hint("rate_limit", true, "Custom/product rate limit (Reels are 30 API posts / 24h). Wait before another Reel or video_reels call.");
+  }
+  if (code >= 80000 && code <= 80014) {
+    return hint("rate_limit", true, "Business-use-case rate limit. Back off using estimated_time_to_regain_access if the header has it.");
+  }
+  if (code === 9 || code === 341) {
+    return hint("rate_limit", true, "Temporary throttle or application limit. Wait and retry with backoff.");
+  }
+  if (code === 368) {
+    return hint("abusive", false, "Meta blocked this action as abusive. Do not retry the same call. Rewrite the caption or wait.");
+  }
+  if (code === 506) {
+    return hint("duplicate", false, "Graph rejected a consecutive duplicate post. Rewrite the caption in this Page's voice, then send.");
+  }
+  if (code === 1609005) {
+    return hint("invalid_param", false, "Facebook could not scrape that link. Check the shop URL (https, public, not facebook.com).");
+  }
+  if (code === 1363040 || code === 1363127 || code === 1363128 || code === 1363129) {
+    return hint("invalid_param", false, "Reel/video spec failed (9:16, 540×960 min, 3–90s, 24–60 fps). Fix the file, then retry.");
+  }
+  if (code === 6000) {
+    return hint("server", true, "Video upload failed on Meta's side. Retry once with the same file; if it fails again, re-encode.");
+  }
+  if (code === 100) {
+    return hint("invalid_param", false, "Invalid Graph parameter. Do not send unpublished_content_type=DRAFT. Check media type and schedule window.");
+  }
+  if (code === 1 && /schedul/i.test(raw)) {
+    return hint("unknown_schedule", false, "This Page cannot Graph-schedule that post. It stays on the local scheduler until the desk is open at send time.");
+  }
+  if (code === 1 || code === 2) {
+    return hint("server", true, "Transient Graph failure. Retry with backoff; if it persists, check Meta's status.");
   }
   if (input.httpStatus >= 500 || input.httpStatus === 429) {
-    return { code, message, kind: "server", retryable: true };
+    return hint("server", true, "Graph is unavailable or throttling (HTTP). Retry with backoff.");
   }
-  return { code, message, kind: "other", retryable: false };
+  return hint("other", false, "See the Graph message. Failures are never silent — retry from Drafts after you fix the cause.");
+}
+
+/** Operator-facing Graph failure: message + what to do + optional fbtrace_id. */
+export function graphOperatorMessage(mapped: GraphErrorMapped, fallback?: string): string {
+  const base = mapped.message || fallback || `Graph error ${mapped.code}`;
+  const hint = mapped.operatorHint && !base.includes(mapped.operatorHint) ? ` — ${mapped.operatorHint}` : "";
+  const trace = mapped.fbtraceId ? ` (fbtrace ${mapped.fbtraceId})` : "";
+  return `${base}${hint}${trace}`;
 }
 
 export type QuotaParse = {
@@ -150,17 +215,29 @@ export function buildFeedPublishPayload(opts: {
   return fields;
 }
 
-export function facebookScheduleWindow(when: Date, now = new Date()): string | null {
+export function facebookScheduleWindow(when: Date, now = new Date(), mediaType?: string): string | null {
   const min = now.getTime() + 10 * 60 * 1000;
-  const max = now.getTime() + 30 * 24 * 60 * 60 * 1000;
+  const maxDays = mediaType === "Reel" ? 29 : 30;
+  const max = now.getTime() + maxDays * 24 * 60 * 60 * 1000;
   const t = when.getTime();
   if (t < min) return "Facebook only accepts schedules 10 minutes or more in the future. This will stay on the local scheduler.";
-  if (t > max) return "Facebook only accepts schedules within 30 days. This will stay on the local scheduler.";
+  if (t > max) {
+    return mediaType === "Reel"
+      ? "Facebook Reels only accept schedules within 29 days. This will stay on the local scheduler."
+      : "Facebook only accepts schedules within 30 days. This will stay on the local scheduler.";
+  }
   return null;
 }
 
 type GraphJson = {
-  error?: { message?: string; code?: number; error_subcode?: number; type?: string };
+  error?: {
+    message?: string;
+    code?: number;
+    error_subcode?: number;
+    type?: string;
+    error_user_msg?: string;
+    fbtrace_id?: string;
+  };
   id?: string;
   post_id?: string;
   video_id?: string;
@@ -181,6 +258,17 @@ export class GraphRequestError extends Error {
 
 async function sleep(ms: number) {
   await new Promise((r) => setTimeout(r, ms));
+}
+
+/** Exponential backoff + jitter. Caps in-request waits; header regain minutes are stored on quota, not slept in full. */
+export function retryDelayMs(attempt: number, quota: QuotaParse | null = null): number {
+  const exp = 400 * 2 ** Math.max(0, attempt);
+  const jitter = Math.floor(Math.random() * 300);
+  const fromHeader =
+    quota?.estimatedRegainMinutes && quota.estimatedRegainMinutes > 0
+      ? Math.min(quota.estimatedRegainMinutes * 1000, 8_000)
+      : 0;
+  return Math.min(exp + jitter + fromHeader, 20_000);
 }
 
 function graphUrl(path: string, token: string, appSecret: string, query?: Record<string, string | number | boolean | undefined>) {
@@ -210,6 +298,8 @@ async function parseGraphResponse(res: Response): Promise<{ json: GraphJson; quo
       code: json.error?.code,
       errorSubcode: json.error?.error_subcode,
       message: json.error?.message,
+      userMessage: typeof json.error?.error_user_msg === "string" ? json.error.error_user_msg : undefined,
+      fbtraceId: typeof json.error?.fbtrace_id === "string" ? json.error.fbtrace_id : undefined,
     });
     throw new GraphRequestError(mapped, quota);
   }
@@ -262,7 +352,7 @@ export async function graphFetch<T = GraphJson>(opts: {
       } catch (e) {
         if (e instanceof GraphRequestError && e.mapped.retryable && attempt < 4 && !opts.signal?.aborted) {
           lastError = e;
-          await sleep(400 * 2 ** attempt);
+          await sleep(retryDelayMs(attempt, e.quota));
           continue;
         }
         throw e;
@@ -273,7 +363,7 @@ export async function graphFetch<T = GraphJson>(opts: {
       // Timeouts after a POST can already have created the Graph object — do not retry publishes.
       if (method !== "GET") throw e;
       if (attempt < 4) {
-        await sleep(400 * 2 ** attempt);
+        await sleep(retryDelayMs(attempt, null));
         continue;
       }
       throw lastError ?? e;
@@ -315,7 +405,7 @@ export async function graphMultipart<T = GraphJson>(opts: {
       } catch (e) {
         if (e instanceof GraphRequestError && e.mapped.retryable && attempt < 3) {
           lastError = e;
-          await sleep(400 * 2 ** attempt);
+          await sleep(retryDelayMs(attempt, e.quota));
           continue;
         }
         throw e;

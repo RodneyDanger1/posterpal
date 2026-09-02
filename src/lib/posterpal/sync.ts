@@ -96,18 +96,28 @@ async function syncOnePage(
   result: SyncResult,
 ) {
   const fbPageId = page.facebook_page_id!;
-  const meta = await graphFetch<{ name?: string; fan_count?: number; category?: string }>({
+  const meta = await graphFetch<{
+    name?: string;
+    fan_count?: number;
+    category?: string;
+    picture?: { data?: { url?: string; is_silhouette?: boolean } };
+  }>({
     path: `/${fbPageId}`,
     token,
     appSecret,
-    query: { fields: "name,fan_count,category" },
+    query: { fields: "name,fan_count,category,picture{url,is_silhouette}" },
   });
   const sql = await getSql();
+  const pictureUrl =
+    meta.data.picture?.data?.url && !meta.data.picture.data.is_silhouette
+      ? meta.data.picture.data.url
+      : null;
   await sql`
     update pages set
       name = coalesce(${meta.data.name ?? null}, name),
       fan_count = coalesce(${meta.data.fan_count ?? null}, fan_count),
       category = coalesce(${meta.data.category ?? null}, category),
+      picture_url = coalesce(${pictureUrl}, picture_url),
       updated_at = now()
     where id = ${page.id} and user_id = ${userId}
   `;
@@ -230,13 +240,18 @@ async function syncOnePage(
         appSecret,
         query: {
           fields:
-            "id,shares,reactions.summary(total_count).limit(0),comments.limit(50).summary(total_count){id,from,message,created_time,is_hidden},insights.metric(post_media_view)",
+            "id,shares,reactions.summary(total_count).limit(0),comments.limit(50).summary(total_count){id,from,message,created_time,is_hidden},insights.metric(post_media_view,post_total_media_view)",
         },
       });
       const reactions = Number(pack.data.reactions?.summary?.total_count ?? 0);
       const comments = Number(pack.data.comments?.summary?.total_count ?? 0);
       const shares = Number(pack.data.shares?.count ?? 0);
-      const views = Number(pack.data.insights?.data?.[0]?.values?.[0]?.value ?? 0) || null;
+      const insightRows = pack.data.insights?.data ?? [];
+      const views =
+        Number(insightRows.find((r) => r.name === "post_total_media_view")?.values?.[0]?.value ?? 0) ||
+        Number(insightRows.find((r) => r.name === "post_media_view")?.values?.[0]?.value ?? 0) ||
+        Number(insightRows[0]?.values?.[0]?.value ?? 0) ||
+        null;
       await sql`
         update posts set
           reactions_count = ${reactions},

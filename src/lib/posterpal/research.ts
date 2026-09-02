@@ -102,6 +102,86 @@ export function extractTopics(captions: string[], extra: string[] = []): string[
     .map(([t]) => t);
 }
 
+const BROWSE_BLOCKED = /(^|\.)(facebook|instagram|threads\.net|l\.facebook)\.com$/i;
+
+/** Public https pages the Agent may fetch. Facebook/Instagram HTML is scraping — blocked. Official developer docs are allowed. */
+export function isBrowsableUrl(raw: string): boolean {
+  try {
+    const u = new URL(raw.trim());
+    if (u.protocol !== "https:") return false;
+    if (u.username || u.password) return false;
+    const host = u.hostname.toLowerCase();
+    if (host === "developers.facebook.com" || host === "developers.meta.com") return true;
+    if (BROWSE_BLOCKED.test(host) || host === "facebook.com" || host.endsWith(".facebook.com")) return false;
+    if (host === "threads.net" || host.endsWith(".threads.net")) return false;
+    if (host === "localhost" || host === "127.0.0.1" || host.endsWith(".local")) return false;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function urlsFromBrief(brief: string): string[] {
+  const found = brief.match(/https:\/\/[^\s)<>"']+/gi) ?? [];
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const raw of found) {
+    const cleaned = raw.replace(/[.,;]+$/, "");
+    if (!isBrowsableUrl(cleaned) || seen.has(cleaned)) continue;
+    seen.add(cleaned);
+    out.push(cleaned);
+  }
+  return out.slice(0, 3);
+}
+
+export async function browsePublicPages(urls: string[]): Promise<ResearchNote[]> {
+  const notes: ResearchNote[] = [];
+  for (const url of urls.slice(0, 3)) {
+    if (!isBrowsableUrl(url)) {
+      notes.push({
+        heading: "Blocked URL",
+        body: "The Agent will not fetch facebook.com or Instagram HTML. That is scraping. Use Graph (Connect) or paste a public news/docs URL.",
+        url,
+        confidence: "verified",
+      });
+      continue;
+    }
+    try {
+      const { stripHtmlToText } = await import("./facebook-docs");
+      const res = await fetch(url, {
+        signal: AbortSignal.timeout(8_000),
+        redirect: "follow",
+        headers: { accept: "text/html,application/xhtml+xml", "user-agent": "PosterPal/1.0 (public-web research; not a Facebook scrape)" },
+      });
+      if (!res.ok) {
+        notes.push({
+          heading: "Fetch failed",
+          body: `HTTP ${res.status} from ${url}. Open it yourself and verify.`,
+          url,
+          confidence: "unverified",
+        });
+        continue;
+      }
+      const html = await res.text();
+      const text = stripHtmlToText(html).slice(0, 1200);
+      notes.push({
+        heading: text.split("\n")[0]?.slice(0, 80) || "Public page",
+        body: text.slice(0, 900) || "Empty or JavaScript-only page. Open the URL yourself.",
+        url,
+        confidence: text.length > 80 ? "verified" : "unverified",
+      });
+    } catch (e) {
+      notes.push({
+        heading: "Could not browse",
+        body: e instanceof Error ? e.message : "Network error",
+        url,
+        confidence: "unverified",
+      });
+    }
+  }
+  return notes;
+}
+
 export function planSearchQueries(profile: PageResearchProfile, brief: string): string[] {
   const year = new Date().getFullYear();
   const locale = profile.localeHint || "";

@@ -10,16 +10,21 @@ import {
   createPairingFn,
   facebookStatusFn,
   getSettingsFn,
+  lanOriginsFn,
   importFacebookTokenFn,
   listDevicesFn,
   listPagesFn,
   revokeDeviceFn,
   saveAiKeysFn,
+  probeImageFn,
+  probeTextFn,
   saveFacebookApp,
   savePrefs,
   saveRssFeedFn,
+  savePostingSlotsFn,
   startPractice,
   syncNowFn,
+  updatePageCadenceFn,
   updatePageVoiceFn,
 } from "@/lib/posterpal/fns";
 import { IMAGE_PROVIDERS, TEXT_PROVIDERS } from "@/lib/posterpal/providers";
@@ -30,6 +35,9 @@ import { FacebookNameHelp } from "@/components/facebook-name-help";
 import { FacebookDomainHelp } from "@/components/facebook-domain-help";
 import { PageHeader } from "@/components/page-header";
 import { useShellStore } from "@/lib/store";
+import { copyText } from "@/lib/utils";
+import { capacitorBootUrl, isPhoneWebView, isPrivateLanHost, isLoopbackHost } from "@/lib/posterpal/runtime-client";
+import { DEFAULT_SLOTS, parseSlots, slotLabel, type PostingSlot } from "@/lib/posterpal/slots";
 
 export const Route = createFileRoute("/settings")({ component: () => <Guard><Settings /></Guard> });
 
@@ -44,6 +52,7 @@ function Settings() {
   const [block, setBlock] = useState(20);
   const [voice, setVoice] = useState("");
   const [rssFeed, setRssFeed] = useState("");
+  const [slots, setSlots] = useState<PostingSlot[]>(DEFAULT_SLOTS);
   const [busy, setBusy] = useState(false);
   const pageId = useShellStore((s) => s.selectedPageId);
   const [openai, setOpenai] = useState("");
@@ -53,6 +62,7 @@ function Settings() {
   const [textProvider, setTextProvider] = useState("grok");
   const [imageProvider, setImageProvider] = useState("grok");
   const [userToken, setUserToken] = useState("");
+  const [lan, setLan] = useState<{ loopback: string; lan: string[] } | null>(null);
 
   useEffect(() => {
     void getSettingsFn().then((s) => {
@@ -62,14 +72,30 @@ function Settings() {
       setBlock(s.cadenceBlock);
       setTextProvider(s.defaultTextProvider);
       setImageProvider(s.defaultImageProvider);
+      if (!s.timezone) {
+        const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+        if (tz) {
+          void savePrefs({ data: { timezone: tz } }).then(() =>
+            setSettings((cur) => (cur ? { ...cur, timezone: tz } : cur)),
+          );
+        }
+      }
     });
     void listPagesFn().then(setPages);
+    void lanOriginsFn()
+      .then(setLan)
+      .catch(() => setLan(null));
   }, []);
 
   useEffect(() => {
     const p = pages.find((x) => x.id === pageId);
     setVoice(p?.brand_voice ?? "");
     setRssFeed(p?.rss_feed_url ?? "");
+    setSlots(parseSlots(p?.posting_slots_json).length ? parseSlots(p?.posting_slots_json) : DEFAULT_SLOTS);
+    if (p) {
+      setWarn(p.cadence_warn_per_24h);
+      setBlock(p.cadence_block_per_24h);
+    }
   }, [pages, pageId]);
 
   return (
@@ -92,6 +118,40 @@ function Settings() {
             }}
           />
         </label>
+        <label className="mt-3 block space-y-1 text-sm">
+          <span className="font-medium">Audience time zone</span>
+          <select
+            className="h-11 w-full rounded-md border border-input bg-background px-2 text-sm"
+            value={settings?.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone}
+            onChange={(e) => {
+              const tz = e.target.value;
+              setSettings((s) => (s ? { ...s, timezone: tz } : s));
+              void savePrefs({ data: { timezone: tz } }).then(() => toast.success("Time zone saved. Heatmap and best-time chips use this."));
+            }}
+          >
+            {Array.from(
+              new Set([
+                settings?.timezone,
+                Intl.DateTimeFormat().resolvedOptions().timeZone,
+                "America/New_York",
+                "America/Chicago",
+                "America/Denver",
+                "America/Los_Angeles",
+                "America/Phoenix",
+                "America/Anchorage",
+                "Pacific/Honolulu",
+                "UTC",
+              ].filter(Boolean) as string[]),
+            ).map((tz) => (
+              <option key={tz} value={tz}>
+                {tz}
+              </option>
+            ))}
+          </select>
+          <p className="text-[12px] text-muted-foreground">
+            Best-time chips and the heatmap count engagement in this zone, not the PC clock. Local Pages usually peak Tuesday–Thursday 9am–1pm in the audience zone.
+          </p>
+        </label>
       </section>
 
       <section className="rounded-xl bg-card p-4 shadow-card">
@@ -113,9 +173,77 @@ function Settings() {
             <span className="font-medium text-foreground">PC + phone:</span> keep the PC on and give it a stable HTTPS name (Cloudflare Tunnel, Tailscale Funnel, or a cheap VPS). That hostname goes in App Domains. Pairing uses the same URL.
           </li>
         </ul>
+        {lan ? (
+          <div className="mt-4 space-y-2 rounded-lg bg-muted/50 p-3">
+            <p className="text-[13px] font-semibold">Phone (same Wi‑Fi, no Docker)</p>
+            <p className="text-[13px] text-muted-foreground">
+              Keep PosterPal running on this PC. In the APK, paste one of these URLs. Facebook Login stays on the PC (localhost). The phone uses this desk’s data.
+            </p>
+            {[lan.loopback, ...lan.lan].map((url) => (
+              <div key={url} className="flex flex-wrap items-center gap-2">
+                <code className="min-w-0 flex-1 break-all rounded-md bg-background px-2 py-1.5 text-[12px]">{url}</code>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() =>
+                    void copyText(url).then((ok) => toast[ok ? "success" : "error"](ok ? "Copied." : "Could not copy."))
+                  }
+                >
+                  Copy
+                </Button>
+              </div>
+            ))}
+            {lan.lan.length === 0 ? (
+              <p className="text-[12px] text-muted-foreground">No LAN address yet — connect Wi‑Fi/Ethernet, then reload Settings.</p>
+            ) : (
+              <p className="text-[12px] text-muted-foreground">
+                On the phone browser (same Wi‑Fi) open{" "}
+                <a className="underline" href={`${lan.lan[0]}/get-app.html`}>
+                  {lan.lan[0]}/get-app.html
+                </a>{" "}
+                to download the APK, then paste the URL above into the app.
+              </p>
+            )}
+            {isPhoneWebView() || (isPrivateLanHost() && !isLoopbackHost()) ? (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  window.location.href = capacitorBootUrl(true);
+                }}
+              >
+                Use a different PC
+              </Button>
+            ) : null}
+          </div>
+        ) : null}
       </section>
 
       <DevicesPanel />
+
+      <section className="rounded-xl bg-card p-4 shadow-card">
+        <h2 className="font-semibold">Practice Pages</h2>
+        <p className="mt-1 text-[13px] text-muted-foreground">
+          After a real Connect, practice Pages hide so they do not mix with Graph. Turn this off to see them again.
+        </p>
+        <label className="mt-3 flex items-center justify-between gap-3 text-sm">
+          Hide practice Pages when live Pages exist
+          <Switch
+            checked={settings?.hidePractice !== false}
+            onCheckedChange={(on) => {
+              void savePrefs({ data: { hidePractice: on } })
+                .then(async () => {
+                  toast.success(on ? "Practice Pages hidden." : "Practice Pages visible.");
+                  setSettings(await getSettingsFn());
+                  setPages(await listPagesFn());
+                })
+                .catch((e: unknown) => toast.error(e instanceof Error ? e.message : "Save failed"));
+            }}
+          />
+        </label>
+      </section>
 
       <section className="rounded-xl bg-card p-4 shadow-card">
         <h2 className="font-semibold">Facebook app</h2>
@@ -132,7 +260,9 @@ function Settings() {
             <Input type="password" value={appSecret} onChange={(e) => setAppSecret(e.target.value)} placeholder="Leave blank to keep existing" />
           </div>
           <p className="text-[12px] text-muted-foreground">
-            Desktop loopback (WPF only): <code className="rounded bg-muted px-1">http://127.0.0.1:55443/callback/</code>
+            Windows app Redirect URI: <code className="rounded bg-muted px-1">http://127.0.0.1:8080/api/facebook/callback</code>
+            <br />
+            Facebook Login only works in the PC window. The phone uses this desk over Wi‑Fi and never holds the App Secret.
             <br />
             Scopes: {REQUIRED_SCOPES.join(", ")}
           </p>
@@ -182,6 +312,9 @@ function Settings() {
               }}
             >
               Sync from Graph
+            </Button>
+            <Button variant="outline" asChild>
+              <Link to="/connect">Connect coach</Link>
             </Button>
             <Button variant="outline" asChild>
               <Link to="/setup">Open wizard</Link>
@@ -241,8 +374,10 @@ function Settings() {
       </section>
 
       <section className="rounded-xl bg-card p-4 shadow-card">
-        <h2 className="font-semibold">Cadence guard</h2>
-        <p className="mt-1 text-[13px] text-muted-foreground">Warn default 8 / 24h. Hard cap default 20. Not a Graph limit — a spam-risk control.</p>
+        <h2 className="font-semibold">Cadence guard · selected Page</h2>
+        <p className="mt-1 text-[13px] text-muted-foreground">
+          Per-Page warn/block. Unique Pages should not share a cap — a bookstore at 8/day and a ticket desk at 10/day are different jobs. Not a Graph limit — a spam-risk control.
+        </p>
         <div className="mt-3 grid grid-cols-2 gap-3">
           <div className="space-y-1">
             <Label>Warn at</Label>
@@ -255,13 +390,18 @@ function Settings() {
         </div>
         <Button
           className="mt-3"
-          onClick={() =>
-            void savePrefs({ data: { cadenceWarn: warn, cadenceBlock: block } })
-              .then(() => toast.success("Cadence saved"))
-              .catch((e: unknown) => toast.error(e instanceof Error ? e.message : "Save failed"))
-          }
+          disabled={!pageId}
+          onClick={() => {
+            if (!pageId) return;
+            void updatePageCadenceFn({ data: { pageId, cadenceWarn: warn, cadenceBlock: block } })
+              .then(async (r) => {
+                toast.success(`Cadence saved for this Page (warn ${r.cadenceWarn} / block ${r.cadenceBlock}).`);
+                setPages(await listPagesFn());
+              })
+              .catch((e: unknown) => toast.error(e instanceof Error ? e.message : "Save failed"));
+          }}
         >
-          Save cadence
+          Save cadence for this Page
         </Button>
       </section>
 
@@ -317,6 +457,74 @@ function Settings() {
         >
           Save feed
         </Button>
+      </section>
+
+      <section className="rounded-xl bg-card p-4 shadow-card">
+        <h2 className="font-semibold">Posting slots · selected Page</h2>
+        <p className="mt-1 text-[13px] text-muted-foreground">
+          Composer’s “Next queue slot” uses these hours. Default is Tuesday/Wednesday 1pm and Saturday 10am local. Nothing auto-posts.
+        </p>
+        <div className="mt-3 flex flex-wrap gap-2">
+          {slots.map((slot, i) => (
+            <span key={`${slot.day}-${slot.hour}-${i}`} className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-1 text-[13px]">
+              {slotLabel(slot)}
+              <button
+                type="button"
+                className="px-1 text-muted-foreground hover:text-foreground"
+                aria-label={`Remove ${slotLabel(slot)}`}
+                onClick={() => setSlots((cur) => cur.filter((_, j) => j !== i))}
+              >
+                ×
+              </button>
+            </span>
+          ))}
+        </div>
+        <div className="mt-3 flex flex-wrap items-end gap-2">
+          <div className="space-y-1">
+            <Label htmlFor="slot-day">Day</Label>
+            <select id="slot-day" className="h-11 rounded-md border border-input bg-background px-2 text-sm" defaultValue="2">
+              {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((d, i) => (
+                <option key={d} value={i}>{d}</option>
+              ))}
+            </select>
+          </div>
+          <div className="space-y-1">
+            <Label htmlFor="slot-hour">Hour</Label>
+            <input id="slot-hour" type="number" min={0} max={23} defaultValue={10} className="h-11 w-20 rounded-md border border-input bg-background px-2 text-sm" />
+          </div>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => {
+              const day = Number((document.getElementById("slot-day") as HTMLSelectElement | null)?.value ?? 2);
+              const hour = Number((document.getElementById("slot-hour") as HTMLInputElement | null)?.value ?? 13);
+              setSlots((cur) => [...cur, { day, hour }]);
+            }}
+          >
+            Add slot
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => setSlots(DEFAULT_SLOTS)}
+          >
+            Reset defaults
+          </Button>
+          <Button
+            disabled={!pageId}
+            onClick={() => {
+              if (!pageId) return;
+              void savePostingSlotsFn({ data: { pageId, slots } })
+                .then(async () => {
+                  toast.success("Slots saved.");
+                  setPages(await listPagesFn());
+                })
+                .catch((e: unknown) => toast.error(e instanceof Error ? e.message : "Save failed"));
+            }}
+          >
+            Save slots
+          </Button>
+        </div>
       </section>
 
       <section className="rounded-xl bg-card p-4 shadow-card">
@@ -385,8 +593,8 @@ function Settings() {
             </li>
           ))}
         </ul>
+        <div className="mt-3 flex flex-wrap gap-2">
         <Button
-          className="mt-3"
           onClick={() => {
             void saveAiKeysFn({
               data: {
@@ -409,6 +617,38 @@ function Settings() {
         >
           Save AI keys
         </Button>
+        <Button
+          type="button"
+          variant="outline"
+          disabled={busy}
+          onClick={() => {
+            setBusy(true);
+            void probeTextFn({ data: { provider: textProvider } })
+              .then((r) => toast[r.ok ? "success" : "error"](`${r.provider}: ${r.detail}`))
+              .catch((e: unknown) => toast.error(e instanceof Error ? e.message : "Caption test failed"))
+              .finally(() => setBusy(false));
+          }}
+        >
+          Test caption model
+        </Button>
+        <Button
+          type="button"
+          variant="outline"
+          disabled={busy}
+          onClick={() => {
+            setBusy(true);
+            void probeImageFn({ data: { provider: imageProvider } })
+              .then((r) => toast[r.ok ? "success" : "error"](`${r.provider}: ${r.detail}`))
+              .catch((e: unknown) => toast.error(e instanceof Error ? e.message : "Image test failed"))
+              .finally(() => setBusy(false));
+          }}
+        >
+          Test image model
+        </Button>
+        </div>
+        <p className="mt-2 text-[12px] text-muted-foreground">
+          Grok uses the platform xAI key when this desk has one. Other models use the boxes above. Test talks to the real API and does not post to Facebook.
+        </p>
       </section>
 
       <section className="rounded-xl bg-card p-4 shadow-card">
@@ -422,7 +662,9 @@ function Settings() {
 
       <section className="rounded-xl bg-card p-4 shadow-card">
         <h2 className="font-semibold">Practice workspace</h2>
-        <p className="mt-1 text-[13px] text-muted-foreground">Seed two local Pages with drafts, comments, and merch if this account is empty.</p>
+        <p className="mt-1 text-[13px] text-muted-foreground">
+          Seed the practice fleet (up to 10 local Pages) with drafts, comments, and merch if this account is empty. Unique Pages — do not copy captions across them.
+        </p>
         <Button
           className="mt-3"
           variant="outline"

@@ -12,12 +12,12 @@ test("local draft save shows the LocalDraft toast", async ({ page }) => {
   await ready(page);
   await page.getByPlaceholder("Write the caption…").fill("E2E draft caption " + Date.now());
   await page.getByRole("button", { name: "Send" }).click();
-  await expect(page.getByText("LocalDraft")).toBeVisible();
+  await expect(page.getByText("LocalDraft", { exact: true })).toBeVisible();
 });
 
 test("Schedule mode auto-fills a date and time", async ({ page }) => {
   await ready(page);
-  await page.getByRole("button", { name: "Schedule" }).click();
+  await page.getByRole("button", { name: "Schedule", exact: true }).click();
   const dt = page.locator('input[type="datetime-local"]');
   await expect(dt).toBeVisible();
   await expect(dt).not.toHaveValue("");
@@ -56,6 +56,6 @@ test("Photo mode with two files offers Switch to Carousel (#25)", async ({ page 
 
   await page.getByRole("button", { name: "Publish now" }).click();
   await page.getByRole("button", { name: "Send" }).click();
-  await expect(page.getByText(/Photo mode posts one image. You attached 2/)).toBeVisible();
-  await expect(page.getByRole("button", { name: "Switch to Carousel" })).toBeVisible();
+  await expect(page.getByText(/Photo mode posts one image. You attached 2/).first()).toBeVisible();
+  await expect(page.getByRole("button", { name: "Switch to Carousel" }).first()).toBeVisible();
 });

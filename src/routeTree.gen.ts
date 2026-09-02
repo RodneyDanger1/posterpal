@@ -14,6 +14,7 @@ import { Route as AgentRouteImport } from './routes/agent'
 import { Route as AnalyticsRouteImport } from './routes/analytics'
 import { Route as CalendarRouteImport } from './routes/calendar'
 import { Route as ComposerRouteImport } from './routes/composer'
+import { Route as ConnectRouteImport } from './routes/connect'
 import { Route as DraftsRouteImport } from './routes/drafts'
 import { Route as InboxRouteImport } from './routes/inbox'
 import { Route as LaterRouteImport } from './routes/later'
@@ -25,9 +26,11 @@ import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as SetupRouteImport } from './routes/setup'
 import { Route as VaultRouteImport } from './routes/vault'
 import { Route as ApiHealthRouteImport } from './routes/api/health'
+import { Route as ApiTickRouteImport } from './routes/api/tick'
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
 import { Route as ApiFacebookCallbackRouteImport } from './routes/api/facebook/callback'
 import { Route as ApiFacebookStartRouteImport } from './routes/api/facebook/start'
+import { Route as ApiSyncActionRouteImport } from './routes/api/sync/action'
 import { Route as ApiSyncPairRouteImport } from './routes/api/sync/pair'
 import { Route as ApiSyncSnapshotRouteImport } from './routes/api/sync/snapshot'
 
@@ -54,6 +57,11 @@ const CalendarRoute = CalendarRouteImport.update({
 const ComposerRoute = ComposerRouteImport.update({
   id: '/composer',
   path: '/composer',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ConnectRoute = ConnectRouteImport.update({
+  id: '/connect',
+  path: '/connect',
   getParentRoute: () => rootRouteImport,
 } as any)
 const DraftsRoute = DraftsRouteImport.update({
@@ -111,6 +119,11 @@ const ApiHealthRoute = ApiHealthRouteImport.update({
   path: '/api/health',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiTickRoute = ApiTickRouteImport.update({
+  id: '/api/tick',
+  path: '/api/tick',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiAuthSplatRoute = ApiAuthSplatRouteImport.update({
   id: '/api/auth/$',
   path: '/api/auth/$',
@@ -124,6 +137,11 @@ const ApiFacebookCallbackRoute = ApiFacebookCallbackRouteImport.update({
 const ApiFacebookStartRoute = ApiFacebookStartRouteImport.update({
   id: '/api/facebook/start',
   path: '/api/facebook/start',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiSyncActionRoute = ApiSyncActionRouteImport.update({
+  id: '/api/sync/action',
+  path: '/api/sync/action',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiSyncPairRoute = ApiSyncPairRouteImport.update({
@@ -143,6 +161,7 @@ export interface FileRoutesByFullPath {
   '/analytics': typeof AnalyticsRoute
   '/calendar': typeof CalendarRoute
   '/composer': typeof ComposerRoute
+  '/connect': typeof ConnectRoute
   '/drafts': typeof DraftsRoute
   '/inbox': typeof InboxRoute
   '/later': typeof LaterRoute
@@ -154,9 +173,11 @@ export interface FileRoutesByFullPath {
   '/setup': typeof SetupRoute
   '/vault': typeof VaultRoute
   '/api/health': typeof ApiHealthRoute
+  '/api/tick': typeof ApiTickRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/facebook/callback': typeof ApiFacebookCallbackRoute
   '/api/facebook/start': typeof ApiFacebookStartRoute
+  '/api/sync/action': typeof ApiSyncActionRoute
   '/api/sync/pair': typeof ApiSyncPairRoute
   '/api/sync/snapshot': typeof ApiSyncSnapshotRoute
 }
@@ -166,6 +187,7 @@ export interface FileRoutesByTo {
   '/analytics': typeof AnalyticsRoute
   '/calendar': typeof CalendarRoute
   '/composer': typeof ComposerRoute
+  '/connect': typeof ConnectRoute
   '/drafts': typeof DraftsRoute
   '/inbox': typeof InboxRoute
   '/later': typeof LaterRoute
@@ -177,9 +199,11 @@ export interface FileRoutesByTo {
   '/setup': typeof SetupRoute
   '/vault': typeof VaultRoute
   '/api/health': typeof ApiHealthRoute
+  '/api/tick': typeof ApiTickRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/facebook/callback': typeof ApiFacebookCallbackRoute
   '/api/facebook/start': typeof ApiFacebookStartRoute
+  '/api/sync/action': typeof ApiSyncActionRoute
   '/api/sync/pair': typeof ApiSyncPairRoute
   '/api/sync/snapshot': typeof ApiSyncSnapshotRoute
 }
@@ -190,6 +214,7 @@ export interface FileRoutesById {
   '/analytics': typeof AnalyticsRoute
   '/calendar': typeof CalendarRoute
   '/composer': typeof ComposerRoute
+  '/connect': typeof ConnectRoute
   '/drafts': typeof DraftsRoute
   '/inbox': typeof InboxRoute
   '/later': typeof LaterRoute
@@ -201,9 +226,11 @@ export interface FileRoutesById {
   '/setup': typeof SetupRoute
   '/vault': typeof VaultRoute
   '/api/health': typeof ApiHealthRoute
+  '/api/tick': typeof ApiTickRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/facebook/callback': typeof ApiFacebookCallbackRoute
   '/api/facebook/start': typeof ApiFacebookStartRoute
+  '/api/sync/action': typeof ApiSyncActionRoute
   '/api/sync/pair': typeof ApiSyncPairRoute
   '/api/sync/snapshot': typeof ApiSyncSnapshotRoute
 }
@@ -215,6 +242,7 @@ export interface FileRouteTypes {
     | '/analytics'
     | '/calendar'
     | '/composer'
+    | '/connect'
     | '/drafts'
     | '/inbox'
     | '/later'
@@ -226,9 +254,11 @@ export interface FileRouteTypes {
     | '/setup'
     | '/vault'
     | '/api/health'
+    | '/api/tick'
     | '/api/auth/$'
     | '/api/facebook/callback'
     | '/api/facebook/start'
+    | '/api/sync/action'
     | '/api/sync/pair'
     | '/api/sync/snapshot'
   fileRoutesByTo: FileRoutesByTo
@@ -238,6 +268,7 @@ export interface FileRouteTypes {
     | '/analytics'
     | '/calendar'
     | '/composer'
+    | '/connect'
     | '/drafts'
     | '/inbox'
     | '/later'
@@ -249,9 +280,11 @@ export interface FileRouteTypes {
     | '/setup'
     | '/vault'
     | '/api/health'
+    | '/api/tick'
     | '/api/auth/$'
     | '/api/facebook/callback'
     | '/api/facebook/start'
+    | '/api/sync/action'
     | '/api/sync/pair'
     | '/api/sync/snapshot'
   id:
@@ -261,6 +294,7 @@ export interface FileRouteTypes {
     | '/analytics'
     | '/calendar'
     | '/composer'
+    | '/connect'
     | '/drafts'
     | '/inbox'
     | '/later'
@@ -272,9 +306,11 @@ export interface FileRouteTypes {
     | '/setup'
     | '/vault'
     | '/api/health'
+    | '/api/tick'
     | '/api/auth/$'
     | '/api/facebook/callback'
     | '/api/facebook/start'
+    | '/api/sync/action'
     | '/api/sync/pair'
     | '/api/sync/snapshot'
   fileRoutesById: FileRoutesById
@@ -285,6 +321,7 @@ export interface RootRouteChildren {
   AnalyticsRoute: typeof AnalyticsRoute
   CalendarRoute: typeof CalendarRoute
   ComposerRoute: typeof ComposerRoute
+  ConnectRoute: typeof ConnectRoute
   DraftsRoute: typeof DraftsRoute
   InboxRoute: typeof InboxRoute
   LaterRoute: typeof LaterRoute
@@ -296,9 +333,11 @@ export interface RootRouteChildren {
   SetupRoute: typeof SetupRoute
   VaultRoute: typeof VaultRoute
   ApiHealthRoute: typeof ApiHealthRoute
+  ApiTickRoute: typeof ApiTickRoute
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
   ApiFacebookCallbackRoute: typeof ApiFacebookCallbackRoute
   ApiFacebookStartRoute: typeof ApiFacebookStartRoute
+  ApiSyncActionRoute: typeof ApiSyncActionRoute
   ApiSyncPairRoute: typeof ApiSyncPairRoute
   ApiSyncSnapshotRoute: typeof ApiSyncSnapshotRoute
 }
@@ -338,6 +377,13 @@ declare module '@tanstack/react-router' {
       path: '/composer'
       fullPath: '/composer'
       preLoaderRoute: typeof ComposerRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/connect': {
+      id: '/connect'
+      path: '/connect'
+      fullPath: '/connect'
+      preLoaderRoute: typeof ConnectRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/drafts': {
@@ -417,6 +463,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiHealthRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/tick': {
+      id: '/api/tick'
+      path: '/api/tick'
+      fullPath: '/api/tick'
+      preLoaderRoute: typeof ApiTickRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/auth/$': {
       id: '/api/auth/$'
       path: '/api/auth/$'
@@ -436,6 +489,13 @@ declare module '@tanstack/react-router' {
       path: '/api/facebook/start'
       fullPath: '/api/facebook/start'
       preLoaderRoute: typeof ApiFacebookStartRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/sync/action': {
+      id: '/api/sync/action'
+      path: '/api/sync/action'
+      fullPath: '/api/sync/action'
+      preLoaderRoute: typeof ApiSyncActionRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/sync/pair': {
@@ -461,6 +521,7 @@ const rootRouteChildren: RootRouteChildren = {
   AnalyticsRoute: AnalyticsRoute,
   CalendarRoute: CalendarRoute,
   ComposerRoute: ComposerRoute,
+  ConnectRoute: ConnectRoute,
   DraftsRoute: DraftsRoute,
   InboxRoute: InboxRoute,
   LaterRoute: LaterRoute,
@@ -472,9 +533,11 @@ const rootRouteChildren: RootRouteChildren = {
   SetupRoute: SetupRoute,
   VaultRoute: VaultRoute,
   ApiHealthRoute: ApiHealthRoute,
+  ApiTickRoute: ApiTickRoute,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
   ApiFacebookCallbackRoute: ApiFacebookCallbackRoute,
   ApiFacebookStartRoute: ApiFacebookStartRoute,
+  ApiSyncActionRoute: ApiSyncActionRoute,
   ApiSyncPairRoute: ApiSyncPairRoute,
   ApiSyncSnapshotRoute: ApiSyncSnapshotRoute,
 }

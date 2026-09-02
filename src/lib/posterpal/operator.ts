@@ -40,6 +40,43 @@ export function dayLabel(day: number): string {
   return DAY_LABELS[day] ?? "";
 }
 
+export function isIanaTimeZone(tz: string): boolean {
+  try {
+    Intl.DateTimeFormat("en-US", { timeZone: tz });
+    return tz.trim().length > 0;
+  } catch {
+    return false;
+  }
+}
+
+/** Day-of-week + hour in an IANA zone (heatmap / best-time chips). */
+export function zonedDayHour(iso: string, timeZone?: string | null): { day: number; hour: number } | null {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  if (!timeZone || !isIanaTimeZone(timeZone)) {
+    return { day: d.getDay(), hour: d.getHours() };
+  }
+  try {
+    const parts = new Intl.DateTimeFormat("en-US", {
+      timeZone,
+      weekday: "short",
+      hour: "numeric",
+      hourCycle: "h23",
+    }).formatToParts(d);
+    const wd = parts.find((p) => p.type === "weekday")?.value ?? "";
+    const hourRaw = Number(parts.find((p) => p.type === "hour")?.value);
+    const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+    const day = days.indexOf(wd);
+    const hour = hourRaw === 24 ? 0 : hourRaw;
+    if (day < 0 || !Number.isFinite(hour) || hour < 0 || hour > 23) {
+      return { day: d.getDay(), hour: d.getHours() };
+    }
+    return { day, hour };
+  } catch {
+    return { day: d.getDay(), hour: d.getHours() };
+  }
+}
+
 export function hourHeatmap(
   rows: Array<{
     published_time?: string | null;
@@ -48,15 +85,15 @@ export function hourHeatmap(
     comments_count?: number | null;
     shares_count?: number | null;
   }>,
+  timeZone?: string | null,
 ): HeatCell[] {
   const cells = new Map<string, HeatCell>();
   for (const r of rows) {
     const iso = r.published_time ?? r.created_at;
     if (!iso) continue;
-    const d = new Date(iso);
-    if (Number.isNaN(d.getTime())) continue;
-    const day = d.getDay();
-    const hour = d.getHours();
+    const zoned = zonedDayHour(iso, timeZone);
+    if (!zoned) continue;
+    const { day, hour } = zoned;
     const key = `${day}:${hour}`;
     const score =
       Number(r.reactions_count ?? 0) + Number(r.comments_count ?? 0) * 2 + Number(r.shares_count ?? 0);
@@ -118,12 +155,9 @@ export function nextDatetimeLocal(day: number, hour: number, now = new Date()): 
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-/** Sprout 2026 fallback when this Page has no history: Tue/Wed 12–8pm local. */
+/** 2026 Pages research fallback when this Page has no history: Wednesday 11am local. */
 export function suggestedIndustrySlot(now = new Date()): string {
-  const d = new Date(now);
-  const day = d.getDay();
-  const targetDay = day === 2 || day === 3 ? day : day < 2 ? 2 : 3;
-  return nextDatetimeLocal(targetDay, 13, now);
+  return nextDatetimeLocal(3, 11, now);
 }
 
 export function applyUtm(url: string, template?: string | null, slug = "post"): string {

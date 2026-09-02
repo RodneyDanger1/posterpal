@@ -1,16 +1,11 @@
-import { createHash, randomBytes, randomInt, randomUUID } from "node:crypto";
+import { randomInt, randomUUID } from "node:crypto";
 import { getSql } from "@/lib/db";
+import { hashDeviceToken, mintDeviceToken } from "./device-token";
 import { inGoldenHour, isBuyingIntent, vaultAlarm } from "./operator";
 import { cadenceForPage, inboxCount, latestQuota, listMerch, listPages, listPosts, listVault, loadSettings } from "./repo";
 import type { DeviceRow, NeedsItem, PairingTicket } from "./types";
 
-export function hashDeviceToken(token: string): string {
-  return createHash("sha256").update(token).digest("hex");
-}
-
-export function mintDeviceToken(): string {
-  return `ppd_${randomBytes(32).toString("hex")}`;
-}
+export { hashDeviceToken, mintDeviceToken };
 
 export async function createPairingCode(userId: string): Promise<PairingTicket> {
   const sql = await getSql();

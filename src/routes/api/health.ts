@@ -8,27 +8,30 @@ import { createFileRoute } from "@tanstack/react-router";
 export const Route = createFileRoute("/api/health")({
   server: {
     handlers: {
-      GET: async () => {
-        const dbUp = await checkDatabase();
-        return Response.json(
-          { status: dbUp ? "ok" : "degraded", live: true, db: dbUp ? "up" : "down" },
-          {
-            status: dbUp ? 200 : 503,
-            headers: { "content-type": "application/json", "cache-control": "no-store" },
+      OPTIONS: () =>
+        new Response(null, {
+          status: 204,
+          headers: {
+            "access-control-allow-origin": "*",
+            "access-control-allow-methods": "GET, OPTIONS",
+            "access-control-max-age": "86400",
           },
-        );
+        }),
+      GET: async () => {
+        const { readDeskHealth } = await import("@/lib/posterpal/log");
+        const health = await readDeskHealth();
+        return Response.json(health, {
+          status: health.db === "up" ? 200 : 503,
+          headers: {
+            "content-type": "application/json",
+            "cache-control": "no-store",
+            // Boot page in the APK is a different origin (http://localhost) and
+            // probes this before navigating. Health is not secret.
+            "access-control-allow-origin": "*",
+            "access-control-allow-methods": "GET, OPTIONS",
+          },
+        });
       },
     },
   },
 });
-
-async function checkDatabase(): Promise<boolean> {
-  try {
-    const { getSql } = await import("@/lib/db");
-    const sql = await getSql();
-    await sql`select 1`;
-    return true;
-  } catch {
-    return false;
-  }
-}

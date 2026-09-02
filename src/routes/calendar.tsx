@@ -8,11 +8,11 @@ import { StatusBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+
 import { Hint } from "@/components/ui/tooltip";
 import { calendarFn, rescheduleFn } from "@/lib/posterpal/fns";
 import { nextEmptyDay, toLocalInput } from "@/lib/posterpal/operator";
-import { useInspectorStore, useShellStore } from "@/lib/store";
+import { useAgentBriefStore, useInspectorStore, useShellStore } from "@/lib/store";
 import { cn, copyText } from "@/lib/utils";
 
 export const Route = createFileRoute("/calendar")({ component: () => <Guard><CalendarView /></Guard> });
@@ -54,15 +54,16 @@ function CalendarView() {
   const [posts, setPosts] = useState<CalPost[]>([]);
   const [cursor, setCursor] = useState(new Date());
   const [mode, setMode] = useState<"month" | "week" | "heat">("month");
+  const [allPages, setAllPages] = useState(false);
   const [dragId, setDragId] = useState<string | null>(null);
   const [pick, setPick] = useState<{ postId: string; when: string } | null>(null);
 
   const load = () => {
-    void calendarFn({ data: { pageId } })
+    void calendarFn({ data: { pageId, allPages } })
       .then(setPosts)
       .catch((e: unknown) => toast.error(e instanceof Error ? e.message : "Calendar failed"));
   };
-  useEffect(load, [pageId]);
+  useEffect(load, [pageId, allPages]);
 
   const days = useMemo(() => {
     if (mode === "week") {
@@ -90,7 +91,8 @@ function CalendarView() {
 
   const composeOn = (day: Date) => {
     const slot = new Date(day);
-    slot.setHours(10, 0, 0, 0);
+    // Sprout 2026 Facebook peak is mid-afternoon local; Composer still lets you change it.
+    slot.setHours(13, 0, 0, 0);
     if (slot.getTime() < Date.now() + 15 * 60 * 1000) slot.setTime(Date.now() + 15 * 60 * 1000);
     setPrefill({ message: "", pageId, when: toLocalInput(slot) });
     void navigate({ to: "/composer" });
@@ -127,13 +129,29 @@ function CalendarView() {
     <div className="space-y-4">
       <PageHeader
         title="Calendar"
-        hint="Drag a post onto a day, then pick the time. Facebook accepts 10 minutes–30 days. Outside that window the local scheduler keeps it until this desk is open. Blue = Facebook scheduled, grey = local, green = already published."
+        line="Double-click an empty day to compose at 1pm local. Drag to reschedule."
+        hint="Drag a post onto a day, then pick the time. Facebook accepts 10 minutes–30 days. Outside that window the local scheduler keeps it. Blue = Facebook scheduled, grey = local, green = already published."
       >
         <Hint label="Previous month or week">
           <Button variant="outline" size="sm" onClick={() => shift(-1)}>Prev</Button>
         </Hint>
         <Hint label="Jump to today">
           <Button variant="outline" size="sm" onClick={() => setCursor(new Date())}>Today</Button>
+        </Hint>
+        <Hint label="Calendar persona reads DESK OPS week/overdue. You still click Publish.">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              useAgentBriefStore.getState().queue(
+                "Plan this week's posting slots using DESK OPS. Flag overdue LocalScheduled and cadence. Suggest the next good slot. Do not publish.",
+                "calendar",
+              );
+              void navigate({ to: "/agent" });
+            }}
+          >
+            Ask agent
+          </Button>
         </Hint>
         <Hint label="Next month or week">
           <Button variant="outline" size="sm" onClick={() => shift(1)}>Next</Button>
@@ -151,14 +169,59 @@ function CalendarView() {
             Next empty day
           </Button>
         </Hint>
-        <Tabs value={mode} onValueChange={(v) => setMode(v as typeof mode)}>
-          <TabsList>
-            <TabsTrigger value="month" title="Full month grid">Month</TabsTrigger>
-            <TabsTrigger value="week" title="Seven days, larger drop targets">Week</TabsTrigger>
-            <TabsTrigger value="heat" title="Last 120 days of posting cadence — darker means more posts that day">Heatmap</TabsTrigger>
-          </TabsList>
-        </Tabs>
+        {(() => {
+          const empty = days.filter((d) => {
+            if (mode === "month" && d.getMonth() !== cursor.getMonth()) return false;
+            return !heat.has(format(d, "yyyy-MM-dd"));
+          }).length;
+          return (
+            <p className="basis-full order-last w-full text-[12px] text-muted-foreground">
+              {empty} empty day{empty === 1 ? "" : "s"} in this {mode === "week" ? "week" : "month"}.
+              {allPages ? " Unique Pages should not share the same caption on the same morning." : " Toggle All Pages to see the whole fleet."}
+            </p>
+          );
+        })()}
+        <Button
+          variant={allPages ? "default" : "outline"}
+          size="sm"
+          onClick={() => setAllPages((v) => !v)}
+          title="Show every Page's posts on one calendar — overnight view for a 10-Page fleet"
+        >
+          {allPages ? "All Pages" : "This Page"}
+        </Button>
       </PageHeader>
+      <div className="flex flex-wrap gap-1">
+        <Button
+          id="cal-view-month"
+          type="button"
+          size="sm"
+          variant={mode === "month" ? "secondary" : "outline"}
+          aria-pressed={mode === "month"}
+          onClick={() => setMode("month")}
+        >
+          Month
+        </Button>
+        <Button
+          id="cal-view-week"
+          type="button"
+          size="sm"
+          variant={mode === "week" ? "secondary" : "outline"}
+          aria-pressed={mode === "week"}
+          onClick={() => setMode("week")}
+        >
+          Week
+        </Button>
+        <Button
+          id="cal-view-heat"
+          type="button"
+          size="sm"
+          variant={mode === "heat" ? "secondary" : "outline"}
+          aria-pressed={mode === "heat"}
+          onClick={() => setMode("heat")}
+        >
+          Heatmap
+        </Button>
+      </div>
 
       <p className="text-[12px] text-muted-foreground">
         {format(cursor, mode === "week" ? "'Week of' MMM d, yyyy" : "MMMM yyyy")}
@@ -216,7 +279,8 @@ function CalendarView() {
                     ) : (
                       <button
                         type="button"
-                        className="text-[11px] text-muted-foreground underline"
+                        className="min-h-7 min-w-7 rounded px-1 text-[11px] text-muted-foreground hover:bg-muted hover:text-foreground"
+                        aria-label={`Compose on ${format(day, "MMM d")}`}
                         onClick={() => composeOn(day)}
                       >
                         +

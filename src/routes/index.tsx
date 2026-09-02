@@ -8,10 +8,15 @@ import { StatusBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { bootstrapApp, startPractice, syncNowFn } from "@/lib/posterpal/fns";
+import { Happenings } from "@/components/happenings";
+import { bootstrapApp, deskLogsFn, startFleetPracticeFn, startPractice, syncNowFn } from "@/lib/posterpal/fns";
 import { inGoldenHour, isOverdue, monetizationFitness, vaultAlarm } from "@/lib/posterpal/operator";
+import { daysSince } from "@/lib/posterpal/briefing";
+import { FleetPulse } from "@/components/fleet-pulse";
+import { IdentityPlanner } from "@/components/identity-planner";
+import { WeekStrip } from "@/components/week-strip";
 import type { HomeSnapshot } from "@/lib/posterpal/types";
-import { useInspectorStore, useShellStore } from "@/lib/store";
+import { useAgentBriefStore, useInspectorStore, useShellStore } from "@/lib/store";
 import { formatFanCount, relativeTime } from "@/lib/utils";
 import { NeedsYou } from "@/components/needs-you";
 
@@ -34,6 +39,9 @@ function PagesHome() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
+  const [happenings, setHappenings] = useState<
+    Array<{ id: string; level: string; scope: string; message: string; extra: string | null; created_at: string }>
+  >([]);
 
   const reload = () => {
     setLoadError(null);
@@ -68,6 +76,13 @@ function PagesHome() {
       })
       .finally(() => {
         if (!c) setLoading(false);
+      });
+    void deskLogsFn({ data: { limit: 8 } })
+      .then((rows) => {
+        if (!c) setHappenings(rows);
+      })
+      .catch(() => {
+        if (!c) setHappenings([]);
       });
     return () => {
       c = true;
@@ -126,7 +141,8 @@ function PagesHome() {
               variant="outline"
               onClick={() => {
                 void startPractice()
-                  .then(() => window.location.reload())
+                  .then(() => startFleetPracticeFn())
+                  .then(() => reload())
                   .catch((e: unknown) => toast.error(e instanceof Error ? e.message : "Failed"));
               }}
             >
@@ -142,7 +158,8 @@ function PagesHome() {
     <div className="space-y-4">
       <PageHeader
         title="Pages"
-        hint="Unlimited Pages you administer. The left rail selects the Page for Composer, Calendar, Inbox, and Analytics. Practice Pages never hit Graph."
+        line="Selected Page drives Composer, Calendar, and Inbox. Practice never hits Graph."
+        hint="Ten unique Pages is the design load. Facebook cannot create Pages via API — create them on facebook.com, then Connect with official Login."
       >
           <Button
             variant="outline"
@@ -169,17 +186,26 @@ function PagesHome() {
           </Button>
       </PageHeader>
 
+      {data.settings.livePageCount === 0 ? (
+        <div className="rounded-lg bg-primary/10 px-3 py-2 text-sm">
+          Practice Pages are local. To publish for real, create a Development Mode app named PosterPal and connect with official Facebook Login.{" "}
+          <Link to="/connect" className="underline">
+            Open Connect
+          </Link>
+        </div>
+      ) : null}
+
       {data.dueSoon.some((p) => isOverdue(p.scheduled_publish_time)) ? (
         <div className="rounded-lg bg-warning/20 px-3 py-2 text-sm">
-          A scheduled post missed its slot. Local scheduler only fires while this desk is open.{" "}
-          <Link to="/drafts" className="underline">
+          A scheduled post missed its slot. The in-tab ticker runs every 60s while this desk is open; the background worker fires the queue when it is not.{" "}
+          <Link to="/drafts" search={{ tab: "queued" }} className="underline">
             Open the queue
           </Link>
         </div>
       ) : null}
 
       {(() => {
-        const selected = data.pages.find((p) => p.id === selectedPageId) ?? data.pages[0];
+        const selected = data.pages.find((p) => p.id === selectedPageId) ?? (selectedPageId ? undefined : data.pages[0]);
         const pm = selected ? data.pageMetrics[selected.id] : undefined;
         const mixDiversity = pm ? pm.mixDiversity : Object.values(data.mix ?? {}).filter((n) => n > 0).length;
         const postedLast24h = pm
@@ -204,7 +230,7 @@ function PagesHome() {
             {data.failedCount > 0 ? (
               <div className="rounded-lg bg-destructive/10 px-3 py-2 text-sm">
                 {data.failedCount} failed publish{data.failedCount === 1 ? "" : "es"} on this desk.{" "}
-                <Link to="/drafts" className="underline">
+                <Link to="/drafts" search={{ tab: "failed" }} className="underline">
                   Retry from Drafts
                 </Link>{" "}
                 — media is still on the original row.
@@ -220,6 +246,30 @@ function PagesHome() {
               </div>
             ) : null}
             <NeedsYou items={data.needs ?? []} onChange={() => void reload()} />
+            {happenings.length > 0 ? (
+              <Card>
+                <CardHeader>
+                  <CardTitle>Happenings</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <Happenings
+                    title=""
+                    logs={happenings}
+                    empty="Quiet so far."
+                    onAsk={(row) => {
+                      useAgentBriefStore.getState().queue(
+                        `What's happening with ${row.scope}? ${row.message} Use DESK OPS. Do not invent Graph calls.`,
+                        "ops",
+                      );
+                      void navigate({ to: "/agent" });
+                    }}
+                  />
+                </CardContent>
+              </Card>
+            ) : null}
+            <WeekStrip week={data.week ?? []} pageId={selected?.id} />
+            <IdentityPlanner data={data} />
+            <FleetPulse data={data} selected={selected} />
             <Card>
               <CardHeader>
                 <CardTitle>
@@ -228,7 +278,7 @@ function PagesHome() {
               </CardHeader>
               <CardContent>
                 <p className="mb-3 text-[13px] text-muted-foreground">
-                  Not a payout scraper. This is the operator checklist Meta actually cares about for Content Monetization, Stars, and shop traffic: Insights threshold, mix, inbox freshness, merch links, tokens.
+                  Not a payout scraper. Checklist for Content Monetization, Stars, and shop traffic: Insights threshold, mix, inbox freshness, merch, tokens.
                 </p>
                 <ul className="grid gap-2 sm:grid-cols-2">
                   {fit.items.map((item) => (
@@ -246,34 +296,97 @@ function PagesHome() {
         );
       })()}
 
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-        {data.pages.map((p) => (
-          <button
-            key={p.id}
-            type="button"
-            onClick={() => setPage(p.id)}
-            className={`rounded-xl bg-card p-4 text-left shadow-card transition-colors ${
-              selectedPageId === p.id ? "ring-2 ring-primary" : "hover:bg-muted/40"
-            }`}
+      {data.pages.length < 10 && data.pages.every((p) => p.is_practice) ? (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-muted/50 px-3 py-2 text-sm">
+          <span>
+            Practice fleet is {data.pages.length} of 10 unique Pages. Expand it to train cadence, uniqueness, and the rail at real load.
+          </span>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => {
+              void startFleetPracticeFn()
+                .then((r) => {
+                  toast.success(r.added ? `Added ${r.added} unique practice Pages.` : "Fleet already at 10.");
+                  return reload();
+                })
+                .catch((e: unknown) => toast.error(e instanceof Error ? e.message : "Could not expand fleet"));
+            }}
           >
-            <div className="flex items-start gap-3">
-              <PageAvatar id={p.id} name={p.name} size={44} />
-              <div className="min-w-0 flex-1">
-                <div className="truncate font-semibold">{p.name}</div>
-                <div className="text-[13px] text-muted-foreground">
-                  {p.category ?? "Page"} · {formatFanCount(p.fan_count)} likes
-                </div>
-                <div className="mt-2 flex flex-wrap gap-1 text-[11px] text-muted-foreground">
-                  {p.is_practice ? <span className="rounded-full bg-muted px-2 py-0.5">Practice</span> : null}
-                  {p.is_read_only ? <span className="rounded-full bg-muted px-2 py-0.5">Analyze only</span> : null}
-                  {p.fan_count < 100 ? (
-                    <span className="rounded-full bg-muted px-2 py-0.5">Insights need 100+ likes</span>
-                  ) : null}
+            Load 10 unique practice Pages
+          </Button>
+        </div>
+      ) : null}
+
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+        {data.pages.map((p) => {
+          const pm = data.pageMetrics[p.id];
+          return (
+            <button
+              key={p.id}
+              type="button"
+              onClick={() => setPage(p.id)}
+              className={`rounded-xl bg-card p-4 text-left shadow-card transition-colors ${
+                selectedPageId === p.id ? "ring-2 ring-primary" : "hover:bg-muted/40"
+              }`}
+            >
+              <div className="flex items-start gap-3">
+                <PageAvatar id={p.id} name={p.name} pictureUrl={p.picture_url} size={44} ring={selectedPageId === p.id} />
+                <div className="min-w-0 flex-1">
+                  <div className="truncate font-semibold">{p.name}</div>
+                  <div className="text-[13px] text-muted-foreground">
+                    {p.category ?? "Page"} · {formatFanCount(p.fan_count)} likes
+                  </div>
+                  <div className="mt-2 flex flex-wrap gap-1 text-[11px] text-muted-foreground">
+                    {p.is_practice ? <span className="rounded-full bg-muted px-2 py-0.5">Practice</span> : null}
+                    {p.is_read_only ? <span className="rounded-full bg-muted px-2 py-0.5">Analyze only</span> : null}
+                    {p.fan_count < 100 ? (
+                      <span className="rounded-full bg-muted px-2 py-0.5">Insights need 100+ likes</span>
+                    ) : null}
+                    {pm ? (
+                      <>
+                        <span className="rounded-full bg-muted px-2 py-0.5 tabular-nums">
+                          {pm.postedLast24h}/{p.cadence_warn_per_24h} today
+                        </span>
+                        {pm.lastPublishedAt ? (
+                          <span className="rounded-full bg-muted px-2 py-0.5">
+                            Last live {daysSince(pm.lastPublishedAt) === 0 ? "today" : `${daysSince(pm.lastPublishedAt)}d ago`}
+                          </span>
+                        ) : (
+                          <span className="rounded-full bg-muted px-2 py-0.5">Never published</span>
+                        )}
+                        {pm.nextScheduledAt ? (
+                          <span className="rounded-full bg-muted px-2 py-0.5">Next {relativeTime(pm.nextScheduledAt)}</span>
+                        ) : !p.is_practice ? (
+                          <span className="rounded-full bg-warning/30 px-2 py-0.5">No upcoming slot</span>
+                        ) : null}
+                        {pm.inboxCount > 0 ? (
+                          <span className="rounded-full bg-muted px-2 py-0.5 tabular-nums">{pm.inboxCount} inbox</span>
+                        ) : null}
+                        {pm.dueCount > 0 ? (
+                          <span className="rounded-full bg-muted px-2 py-0.5 tabular-nums">{pm.dueCount} queued</span>
+                        ) : null}
+                        <span
+                          className={`rounded-full px-2 py-0.5 tabular-nums ${
+                            pm.uniqueness < 55 ? "bg-warning/30" : "bg-muted"
+                          }`}
+                          title="How distinct this Page's captions are from the rest of the fleet"
+                        >
+                          Unique {pm.uniqueness}
+                        </span>
+                      </>
+                    ) : null}
+                  </div>
+                  {p.brand_voice ? (
+                    <p className="mt-2 line-clamp-2 text-[12px] text-muted-foreground">{p.brand_voice}</p>
+                  ) : (
+                    <p className="mt-2 text-[12px] text-muted-foreground">No brand voice yet — set one in Settings so this Page stays unique.</p>
+                  )}
                 </div>
               </div>
-            </div>
-          </button>
-        ))}
+            </button>
+          );
+        })}
       </div>
 
       <div className="grid gap-3 lg:grid-cols-2">
@@ -315,7 +428,7 @@ function PagesHome() {
           </CardHeader>
           <CardContent className="space-y-3">
             {data.dueSoon.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No scheduled posts. Local scheduler runs every 60s while the desk is open.</p>
+              <p className="text-sm text-muted-foreground">No scheduled posts. The in-tab ticker runs every 60s while PosterPal.exe is open. LocalScheduled posts fire from this PC — no Docker.</p>
             ) : (
               data.dueSoon.map((p) => (
                 <button

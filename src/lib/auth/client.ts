@@ -39,15 +39,38 @@ export { GROK_PROVIDERS };
 // to server functions, via `@/lib/auth/middleware`). Empty everywhere except the
 // preview after a popup sign-in, so the cookie path is untouched elsewhere.
 const BEARER_KEY = "grok-auth.bearer-token";
+const DEVICE_KEY = "posterpal-device-token";
 
-/** The stored preview bearer token, or null. */
-export function getBearerToken(): string | null {
+/** Paired-device token (`ppd_…`) from /pair, or null. */
+export function getDeviceToken(): string | null {
   if (typeof window === "undefined") return null;
   try {
-    return window.sessionStorage.getItem(BEARER_KEY);
+    return window.localStorage.getItem(DEVICE_KEY);
   } catch {
     return null;
   }
+}
+
+export function setDeviceToken(token: string | null): void {
+  if (typeof window === "undefined") return;
+  try {
+    if (token) window.localStorage.setItem(DEVICE_KEY, token);
+    else window.localStorage.removeItem(DEVICE_KEY);
+  } catch {
+    /* iframe / cookie-blocked */
+  }
+}
+
+/** Session bearer (preview) or paired-device token. Auth middleware forwards this. */
+export function getBearerToken(): string | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const session = window.sessionStorage.getItem(BEARER_KEY);
+    if (session) return session;
+  } catch {
+    /* ignore */
+  }
+  return getDeviceToken();
 }
 
 function setBearerToken(token: string | null): void {
@@ -206,6 +229,7 @@ export async function signOut(redirectTo = "/"): Promise<void> {
     await authClient.signOut();
   } finally {
     setBearerToken(null);
+    setDeviceToken(null);
   }
   window.location.href = redirectTo;
 }

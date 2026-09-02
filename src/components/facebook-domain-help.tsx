@@ -37,16 +37,16 @@ export function FacebookDomainHelp({ origin }: { origin?: string }) {
   const hints = facebookDomainHints(liveOrigin);
   const publishedHost = (import.meta.env.VITE_PUBLIC_HOSTNAME as string | undefined)?.trim() || "";
   const published = Boolean(publishedHost);
-  if (hints.isLoopback) {
+  if (hints.isLoopback || hints.isPrivateLan) {
     return (
       <div className="space-y-2 rounded-lg bg-muted/60 px-3 py-2 text-[13px] text-muted-foreground">
         <p>
-          This copy is running as localhost. Leave <strong>App Domains</strong> empty — Facebook rejects IP addresses.
+          This copy is running on your PC. Leave <strong>App Domains</strong> empty — Facebook rejects IP addresses.
           Put only this Redirect URI in Facebook Login → Valid OAuth Redirect URIs:{" "}
-          <code className="rounded bg-muted px-1 text-foreground">{hints.redirectUri}</code>
+          <code className="rounded bg-muted px-1 text-foreground">http://127.0.0.1:8080/api/facebook/callback</code>
         </p>
         <p>
-          A phone cannot reach localhost on your PC. For an APK you need a public HTTPS URL (published desk or a tunnel to this machine).
+          The Android APK does not log into Facebook. Keep PosterPal open on Windows, then on the phone paste the Wi‑Fi URL from Settings → Phone. Same Pages, drafts, and inbox.
         </p>
       </div>
     );

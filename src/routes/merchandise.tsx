@@ -27,12 +27,16 @@ function Merch() {
   const [utm, setUtm] = useState("utm_source=facebook&utm_medium=social&utm_campaign={slug}");
 
   const load = () => {
-    void listPagesFn().then(setPages);
-    void merchFn({ data: { pageId: pageId ?? undefined } }).then(setRows);
+    void listPagesFn()
+      .then(setPages)
+      .catch((e: unknown) => toast.error(e instanceof Error ? e.message : "Could not load Pages"));
+    void merchFn({ data: { pageId: pageId ?? undefined } })
+      .then(setRows)
+      .catch((e: unknown) => toast.error(e instanceof Error ? e.message : "Could not load merch"));
   };
   useEffect(load, [pageId]);
 
-  const page = pages.find((p) => p.id === pageId) ?? pages[0];
+  const page = pages.find((p) => p.id === pageId) ?? (pageId ? undefined : pages[0]);
 
   return (
     <div className="grid gap-4 lg:grid-cols-[1fr_320px]">
@@ -96,7 +100,10 @@ function Merch() {
         className="rounded-xl bg-card p-4 shadow-card"
         onSubmit={(e) => {
           e.preventDefault();
-          if (!page) return;
+          if (!page) {
+            toast.error("Pick a Page from the rail first. Merch is not remapped onto another Page.");
+            return;
+          }
           void saveMerchFn({ data: { pageId: page.id, title, url, platform, cta, utm } })
             .then(() => {
               toast.success("Saved");

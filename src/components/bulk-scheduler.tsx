@@ -1,7 +1,7 @@
 import { useRef, useState } from "react";
 import { toast } from "sonner";
 import { bulkScheduleFn } from "@/lib/posterpal/fns";
-import { parseCsv } from "@/lib/posterpal/csv";
+import { mapBulkCsvRows, parseCsv } from "@/lib/posterpal/csv";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -11,18 +11,11 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 
 type ParsedRow = { message: string; when: string; pageId: string };
 
-export function BulkScheduler({
-  pages,
-  selectedPageId,
-}: {
-  pages: Array<{ id: string; name: string }>;
-  selectedPageId: string;
-}) {
+export function BulkScheduler({ selectedPageId }: { selectedPageId: string }) {
   const [open, setOpen] = useState(false);
   const [csv, setCsv] = useState("");
   const [rows, setRows] = useState<ParsedRow[]>([]);
@@ -31,20 +24,10 @@ export function BulkScheduler({
   const fileRef = useRef<HTMLInputElement>(null);
 
   function parse() {
-    const parsed = parseCsv(csv);
-    const header = parsed[0] ?? [];
-    const hasHeader = header.some((h) => /caption|when|page/i.test(h));
-    const body = hasHeader ? parsed.slice(1) : parsed;
-    const next: ParsedRow[] = body
-      .map((r) => ({
-        message: (r[0] ?? "").trim(),
-        when: (r[1] ?? "").trim(),
-        pageId: (r[2] ?? "").trim(),
-      }))
-      .filter((r) => r.message);
+    const next = mapBulkCsvRows(parseCsv(csv));
     setRows(next);
     setResults(null);
-    if (next.length === 0) toast.error("No rows found. One caption per line: caption, when (optional), page (optional).");
+    if (next.length === 0) toast.error("No rows found. Header can be caption, when, page in any order.");
   }
 
   async function submit() {

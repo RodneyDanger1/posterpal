@@ -4,6 +4,16 @@ PosterPal is a **personal desk**. Out of the box there is no sign-in: open the a
 
 Facebook is optional. Practice Pages work offline. Connect a Facebook app only when you want live publish, comment pull, and insights.
 
+## Running 10 unique Pages
+
+Graph **cannot create Facebook Pages**. Create each Page at [facebook.com/pages/create](https://www.facebook.com/pages/create) with a distinct name, category, about blurb, and profile art. Add yourself as Admin. Keep the Facebook App in Development Mode and add yourself as Admin/Developer/Tester.
+
+Then PosterPal Settings → paste App ID/Secret → Connect. One OAuth round-trip imports every Page with `CREATE_CONTENT` from `GET /me/accounts` (paged; more than 25 is fine).
+
+Unique Pages that share captions look like a spam network. The desk **blocks** near-duplicate copy across Pages. “Also draft on” queues LocalDrafts for remix — it will not publish the same caption ten times. Cadence is per-Page.
+
+Practice mode seeds **10 unique Pages** (bookstore, events, ceramics, merch, coffee, tickets, dog walks, press, meal kits, tours) so you can train the fleet before Facebook is connected.
+
 ## Facebook App display name
 
 **Use PosterPal.** Meta Basic Settings reject Facebook, FB, Meta, Instagram, WhatsApp, **Book**, and **Face** if they read as a Facebook reference. BookBoss was illegal. PosterPal is not.
@@ -18,7 +28,7 @@ The setup wizard includes a live name checker. Safe alternatives: PageDesk, Shor
 4. Enable **Client OAuth Login** and **Web OAuth Login**.
 5. Valid OAuth Redirect URIs:
    - This web app: `https://<your-host>/api/facebook/callback`
-   - Windows WPF kernel: `http://127.0.0.1:55443/callback/` (exact)
+   - Windows app: `http://127.0.0.1:8080/api/facebook/callback`
 6. **App Domains** (Settings → Basic): the hostname only, no `https://`. Facebook rejects `127.0.0.1` here — leave empty for localhost.
 7. **Website Site URL** (Settings → Basic → Add platform → Website): `https://<your-host>/`
 8. **Keep Development Mode.** Add the operator as Admin, Developer, or Tester.

@@ -1,5 +1,7 @@
 # Surpass.md — PosterPal transformation bible
 
+> **Current map (2026-09-01):** [`README.md`](README.md) + [`ARCHITECTURE.md`](ARCHITECTURE.md). This file is still the Meta-policy and strategy handoff, but several “missing” items (Docker, worker, bulk, RSS, recycle, 10-Page fleet, login wall, pairing bearer) **shipped after it was written**. §8 critical/high bugs are fixed. Do not re-implement them.
+
 > **Read this entire file before writing code.** It is the handoff for any AI agent (or human) who will transform PosterPal from a working personal Facebook Pages desk into the best self-hosted Facebook Page CRM a solo operator can run.
 
 ---

@@ -30,3 +30,30 @@ export function parseCsv(text: string): string[][] {
   if (row.some((f) => f.trim() !== "")) rows.push(row);
   return rows;
 }
+
+export type BulkCsvRow = { message: string; when: string; pageId: string };
+
+/** Map caption/when/page by header name when present, else column order. */
+export function mapBulkCsvRows(parsed: string[][]): BulkCsvRow[] {
+  const header = parsed[0] ?? [];
+  const hasHeader = header.some((h) => /caption|message|when|date|page/i.test(h));
+  let messageIdx = 0;
+  let whenIdx = 1;
+  let pageIdx = 2;
+  if (hasHeader) {
+    header.forEach((h, i) => {
+      const k = h.trim().toLowerCase();
+      if (/^(caption|message|text|body)$/.test(k)) messageIdx = i;
+      else if (/^(when|date|time|scheduled|at)$/.test(k)) whenIdx = i;
+      else if (/^(page|pageid|page_id|pagename|page name)$/.test(k)) pageIdx = i;
+    });
+  }
+  const body = hasHeader ? parsed.slice(1) : parsed;
+  return body
+    .map((r) => ({
+      message: (r[messageIdx] ?? "").trim(),
+      when: (r[whenIdx] ?? "").trim(),
+      pageId: (r[pageIdx] ?? "").trim(),
+    }))
+    .filter((r) => r.message);
+}

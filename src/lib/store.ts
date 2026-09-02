@@ -7,6 +7,7 @@ export type PrefillMedia = {
   dataUrl: string;
   altText: string;
   createdWithAi: boolean;
+  assetId?: string;
 };
 
 export type ComposerPrefill = {
@@ -17,6 +18,8 @@ export type ComposerPrefill = {
   when?: string | null;
   link?: string;
   imagePrompt?: string;
+  firstComment?: string;
+  recycleAfterDays?: number | null;
 };
 
 type ShellState = {
@@ -28,6 +31,8 @@ type ShellState = {
   setTheme: (t: "light" | "dark") => void;
   composerPrefill: ComposerPrefill | null;
   setComposerPrefill: (p: ComposerPrefill | null) => void;
+  lastAgentPersona: string | null;
+  setLastAgentPersona: (id: string | null) => void;
 };
 
 const memoryBucket: Record<string, string> = {};
@@ -104,17 +109,34 @@ export const useShellStore = create<ShellState>()(
       },
       composerPrefill: null,
       setComposerPrefill: (p) => set({ composerPrefill: p }),
+      lastAgentPersona: null,
+      setLastAgentPersona: (id) => set({ lastAgentPersona: id }),
     }),
     {
       name: "posterpal-shell",
       storage: createJSONStorage(() => iframeSafeStorage()),
-      partialize: (s) => ({ theme: s.theme, selectedPageId: s.selectedPageId }),
+      partialize: (s) => ({
+        theme: s.theme,
+        selectedPageId: s.selectedPageId,
+        lastAgentPersona: s.lastAgentPersona,
+        composerPrefill: s.composerPrefill
+          ? {
+              ...s.composerPrefill,
+              media: s.composerPrefill.media?.map((m) => ({
+                ...m,
+                dataUrl: m.dataUrl?.startsWith("data:") ? "" : m.dataUrl,
+              })),
+            }
+          : null,
+      }),
       merge: (persisted, current) => {
         const p = (persisted ?? {}) as Partial<ShellState>;
         return {
           ...current,
           theme: p.theme === "dark" ? "dark" : current.theme,
           selectedPageId: typeof p.selectedPageId === "string" ? p.selectedPageId : current.selectedPageId,
+          lastAgentPersona: typeof p.lastAgentPersona === "string" ? p.lastAgentPersona : current.lastAgentPersona,
+          composerPrefill: p.composerPrefill ?? current.composerPrefill,
         };
       },
       onRehydrateStorage: () => (state) => {
@@ -133,6 +155,23 @@ export function adoptLivePageId(pageIds: string[], preferred?: string | null) {
   useShellStore.getState().setSelectedPageId(next);
   return next;
 }
+
+/** Ephemeral brief queued from Needs you / command palette into /agent. */
+export type AgentBrief = { brief: string; persona?: string };
+
+export const useAgentBriefStore = create<{
+  pending: AgentBrief | null;
+  queue: (brief: string, persona?: string) => void;
+  consume: () => AgentBrief | null;
+}>((set, get) => ({
+  pending: null,
+  queue: (brief, persona) => set({ pending: { brief: brief.slice(0, 2000), persona } }),
+  consume: () => {
+    const b = get().pending;
+    set({ pending: null });
+    return b;
+  },
+}));
 
 /** Ephemeral — kept off the persisted shell so HMR and cookie-blocked storage cannot drop it. */
 export const useInspectorStore = create<{

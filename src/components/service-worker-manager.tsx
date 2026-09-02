@@ -11,6 +11,13 @@ export function ServiceWorkerManager() {
     if (typeof window === "undefined") return;
     if (!("serviceWorker" in navigator)) return;
     if (import.meta.env.DEV) return;
+    // Electron is the desk itself — a cached shell after an EXE update is a bug.
+    if (/Electron/i.test(navigator.userAgent)) {
+      void navigator.serviceWorker.getRegistrations().then((regs) => {
+        for (const r of regs) void r.unregister();
+      });
+      return;
+    }
     const register = () => {
       navigator.serviceWorker.register("/sw.js").catch(() => {
         /* progressive enhancement — ignore */

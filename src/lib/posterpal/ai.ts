@@ -9,7 +9,11 @@ export function aiAvailable(): boolean {
 
 async function chat(system: string, user: string, maxTokens = 700): Promise<string> {
   const apiKey = process.env.XAI_API_KEY;
-  if (!apiKey) throw new Error("AI is not available in this environment");
+  if (!apiKey) {
+    throw new Error(
+      "Grok isn't configured on this desk. Open Settings, paste an OpenAI / Gemini / DeepSeek key, and pick that caption model.",
+    );
+  }
   return chatOpenAiCompat({
     url: "https://api.x.ai/v1/chat/completions",
     apiKey,
@@ -199,14 +203,19 @@ export async function suggestHashtags(input: {
   return tags.filter((t) => t.startsWith("#")).slice(0, 8);
 }
 
-export async function analyzeContent(content: string): Promise<ContentAnalysis> {
-  const raw = await chat(
-    `Analyze this Facebook comment or caption. Return JSON:
+export async function analyzeContent(
+  content: string,
+  opts?: { provider?: TextProviderId; apiKey?: string | null },
+): Promise<ContentAnalysis> {
+  const raw = await chatWithProvider({
+    provider: opts?.provider ?? "grok",
+    apiKey: opts?.apiKey,
+    maxTokens: 300,
+    system: `Analyze this Facebook comment or caption. Return JSON:
 {"sentiment":"positive|neutral|negative|question","topics":[],"riskFlags":[],"suggestedHashtags":[]}.
 riskFlags are policy risks (hate, spam, scams), not style notes.`,
-    content.slice(0, 2000),
-    300,
-  );
+    user: content.slice(0, 2000),
+  });
   const json = extractJson(raw);
   const sent = String(json.sentiment ?? "neutral");
   const sentiment: Sentiment =
@@ -225,15 +234,19 @@ export async function draftReplies(input: {
   comment: string;
   brandVoice?: string | null;
   pageName: string;
+  provider?: TextProviderId;
+  apiKey?: string | null;
 }): Promise<string[]> {
   const voice = input.brandVoice || "Helpful, specific, never sycophantic. Human must send — do not sound automated.";
-  const raw = await chat(
-    `You draft Facebook comment REPLIES for "${input.pageName}". Voice: ${voice}.
+  const raw = await chatWithProvider({
+    provider: input.provider ?? "grok",
+    apiKey: input.apiKey,
+    maxTokens: 400,
+    system: `You draft Facebook comment REPLIES for "${input.pageName}". Voice: ${voice}.
 A human will click Send — never imply the reply was auto-sent.
 Return JSON {"drafts":["...","...","..."]} — exactly 3 short replies (1–3 sentences).`,
-    input.comment.slice(0, 1500),
-    400,
-  );
+    user: input.comment.slice(0, 1500),
+  });
   const json = extractJson(raw);
   const drafts = Array.isArray(json.drafts) ? json.drafts.map(String) : [];
   while (drafts.length < 3) drafts.push("Thanks for writing in — let me look into that and get back to you.");
@@ -354,16 +367,28 @@ async function openaiImage(
   return { error: last };
 }
 
-function packOpenAiImage(
+async function urlToDataUrl(url: string, fallbackMime = "image/png"): Promise<string> {
+  const img = await fetch(url, { signal: AbortSignal.timeout(20_000) });
+  if (!img.ok) throw new Error(`Could not download image (${img.status})`);
+  const buf = Buffer.from(await img.arrayBuffer());
+  const mime = img.headers.get("content-type")?.split(";")[0]?.trim() || fallbackMime;
+  return `data:${mime};base64,${buf.toString("base64")}`;
+}
+
+async function packOpenAiImage(
   body: { data?: Array<{ b64_json?: string; url?: string }> },
   fileName: string,
-): { dataUrl: string; fileName: string } | { error: string } {
+): Promise<{ dataUrl: string; fileName: string } | { error: string }> {
   const first = body.data?.[0];
   if (first?.b64_json) {
     return { dataUrl: `data:image/png;base64,${first.b64_json}`, fileName };
   }
   if (first?.url) {
-    return { dataUrl: first.url, fileName };
+    try {
+      return { dataUrl: await urlToDataUrl(first.url), fileName };
+    } catch (e) {
+      return { error: e instanceof Error ? e.message : "Could not download image bytes." };
+    }
   }
   return { error: "Image API returned no image." };
 }

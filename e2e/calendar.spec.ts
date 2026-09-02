@@ -4,13 +4,17 @@ import { expect, test } from "@playwright/test";
 
 test("Month / Week / Heatmap tabs all activate", async ({ page }) => {
   await page.goto("/calendar");
-  await expect(page.getByRole("tab", { name: "Month" })).toBeVisible();
+  // SSR paints the view buttons before hydration. Wait for client data so
+  // React owns the buttons — otherwise the click hits a dead SSR node.
+  await expect(page.locator("[draggable]").first()).toBeVisible({ timeout: 15_000 });
+  await expect(page.locator("#cal-view-month")).toBeVisible();
 
-  await page.getByRole("tab", { name: "Week" }).click();
-  await expect(page.getByRole("tab", { name: "Week" })).toHaveAttribute("aria-selected", "true");
+  await page.locator("#cal-view-week").click();
+  await expect(page.locator("#cal-view-week")).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByText(/Week of/)).toBeVisible();
 
-  await page.getByRole("tab", { name: "Heatmap" }).click();
-  await expect(page.getByRole("tab", { name: "Heatmap" })).toHaveAttribute("aria-selected", "true");
+  await page.locator("#cal-view-heat").click();
+  await expect(page.locator("#cal-view-heat")).toHaveAttribute("aria-pressed", "true");
 });
 
 test("Published posts are not draggable; scheduled posts are", async ({ page }) => {

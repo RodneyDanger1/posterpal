@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { cadenceLevel, runPolicyChecklist, validateReel } from "../src/lib/posterpal/policy.ts";
+import { cadenceLevel, REMIX_MARK, reelCapLevel, runPolicyChecklist, validateReel } from "../src/lib/posterpal/policy.ts";
 import { publishToast } from "../src/lib/posterpal/operator.ts";
 
 test("cadenceLevel blocks at the cap, warns below it", () => {
@@ -39,6 +39,18 @@ test("#ad and #sponsored count as branded-content disclosure", () => {
   );
 });
 
+test("remix marker blocks publish until rewritten", () => {
+  const r = runPolicyChecklist({
+    message: `${REMIX_MARK}\n\nSaturday story hour is back at 10:30.`,
+    hasImages: false,
+    missingAlt: false,
+    createdWithAi: false,
+    recentMessages: [],
+  });
+  assert.equal(r.canPublish, false);
+  assert.ok(r.flags.some((f) => f.id === "remix-required"));
+});
+
 test("duplicate captions block", () => {
   const recent = [{ id: "1", message: "Saturday story hour is back at 10:30. Picture books on the river rug." }];
   const dup = runPolicyChecklist({
@@ -52,10 +64,29 @@ test("duplicate captions block", () => {
   assert.ok(dup.flags.some((f) => f.severity === "block"));
 });
 
-test("validateReel rejects landscape and too-short clips", () => {
+test("validateReel rejects landscape and out-of-range clips", () => {
   assert.match(validateReel({ width: 1920, height: 1080, durationMs: 8000 }) ?? "", /9:16/);
-  assert.match(validateReel({ width: 1080, height: 1920, durationMs: 1500 }) ?? "", /3–60/);
+  assert.match(validateReel({ width: 1080, height: 1920, durationMs: 1500 }) ?? "", /3–90/);
   assert.equal(validateReel({ width: 1080, height: 1920, durationMs: 15000 }), null);
+  assert.equal(validateReel({ width: 1080, height: 1920, durationMs: 90_000 }), null);
+  assert.match(validateReel({ width: 1080, height: 1920, durationMs: 91_000 }) ?? "", /3–90/);
+});
+
+test("reelCapLevel blocks at Meta's 30/24h API window", () => {
+  assert.equal(reelCapLevel(0), "ok");
+  assert.equal(reelCapLevel(24), "ok");
+  assert.equal(reelCapLevel(25), "warn");
+  assert.equal(reelCapLevel(30), "block");
+  const blocked = runPolicyChecklist({
+    message: "River walk after rain.",
+    hasImages: false,
+    missingAlt: false,
+    createdWithAi: false,
+    recentMessages: [],
+    reelLast24h: 30,
+  });
+  assert.equal(blocked.canPublish, false);
+  assert.ok(blocked.flags.some((f) => f.id === "reel-cap" && f.severity === "block"));
 });
 
 test("Failed publishes are never reported as success toasts", () => {

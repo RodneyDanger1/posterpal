@@ -1,8 +1,12 @@
 {
-  "name": "app-builder-workspace",
+  "name": "posterpal",
+  "version": "1.0.0",
+  "description": "PosterPal — Facebook Pages desk for Windows and Android",
+  "author": "PosterPal",
   "private": true,
   "sideEffects": false,
   "type": "module",
+  "main": "electron/main.mjs",
   "overrides": {
     "nf3": "0.3.17"
   },
@@ -20,6 +24,11 @@
     "e2e": "playwright test",
     "e2e:ui": "playwright test --ui",
     "verify": "npm run typecheck && npm run lint && npm test && npm run e2e",
+    "build:desk": "cross-env VITE_AUTH_ENABLED=false NITRO_PRESET=node-server vite build && node scripts/prepare-desktop.mjs && npm run db:migrate",
+    "desktop": "npx electron .",
+    "desktop:build": "npm run build:desk && npx electron-builder --win portable --x64",
+    "mobile:sync": "npx cap sync android && node scripts/patch-android.mjs",
+    "mobile:apk": "npx cap sync android && node scripts/patch-android.mjs && node scripts/assemble-apk.mjs",
     "lint": "eslint .",
     "format": "prettier --write ."
   },
@@ -77,6 +86,9 @@
     "zustand": "^5.0.0"
   },
   "devDependencies": {
+    "@capacitor/android": "^6.2.0",
+    "@capacitor/cli": "^6.2.0",
+    "@capacitor/core": "^6.2.0",
     "@eslint/js": "^9.20.0",
     "@playwright/test": "^1.62.0",
     "@types/node": "^22.16.5",
@@ -85,6 +97,8 @@
     "@types/react-dom": "^19.2.0",
     "@vitejs/plugin-react": "^5.2.0",
     "cross-env": "^10.1.0",
+    "electron": "^31.7.7",
+    "electron-builder": "^25.1.8",
     "eslint": "^9.20.0",
     "eslint-config-prettier": "^10.1.1",
     "eslint-plugin-prettier": "^5.2.6",
@@ -99,5 +113,53 @@
     "typescript": "^5.7.0",
     "typescript-eslint": "^8.56.1",
     "vite": "^8.2.0"
+  },
+  "build": {
+    "appId": "com.posterpal.desk",
+    "productName": "PosterPal",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "electron/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": ".output",
+        "to": ".output"
+      },
+      {
+        "from": "migrations",
+        "to": "migrations"
+      },
+      {
+        "from": "public/icon-512.png",
+        "to": "public/icon-512.png"
+      },
+      {
+        "from": "public/icon-192.png",
+        "to": "public/icon-192.png"
+      },
+      {
+        "from": "public/get-app.html",
+        "to": ".output/public/get-app.html"
+      },
+      {
+        "from": "android/app/build/outputs/apk/debug/app-debug.apk",
+        "to": "apk/PosterPal.apk"
+      }
+    ],
+    "win": {
+      "target": [
+        "portable",
+        "dir"
+      ],
+      "icon": "public/icon-512.png",
+      "signAndEditExecutable": false,
+      "verifyUpdateCodeSignature": false,
+      "artifactName": "PosterPal.exe"
+    },
+    "asar": true
   }
 }

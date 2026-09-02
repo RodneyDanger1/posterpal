@@ -17,10 +17,20 @@ export async function handleFacebookCallback(request: Request): Promise<Response
   if (!code || !state) return htmlResult("Missing code or state from Facebook.", false, publicOrigin(request));
 
   const sql = await getSql();
-  const states = await sql<{ user_id: string }>`
-    select user_id from oauth_states where state = ${state} and expires_at > now()
-  `;
-  const userId = states[0]?.user_id;
+  let userId: string | undefined;
+  let storedRedirect: string | null = null;
+  try {
+    const states = await sql<{ user_id: string; redirect_uri: string | null }>`
+      select user_id, redirect_uri from oauth_states where state = ${state} and expires_at > now()
+    `;
+    userId = states[0]?.user_id;
+    storedRedirect = states[0]?.redirect_uri ?? null;
+  } catch {
+    const states = await sql<{ user_id: string }>`
+      select user_id from oauth_states where state = ${state} and expires_at > now()
+    `;
+    userId = states[0]?.user_id;
+  }
   if (!userId) {
     return htmlResult("OAuth state expired or invalid. Close this window and click Connect again.", false, publicOrigin(request));
   }
@@ -40,7 +50,7 @@ export async function handleFacebookCallback(request: Request): Promise<Response
   }
 
   try {
-    const short = await exchangeCode(appId, appSecret, code, request);
+    const short = await exchangeCode(appId, appSecret, code, request, storedRedirect);
     if (!short.access_token) {
       await rememberError(userId, "Token exchange returned no access_token.", publicOrigin(request));
       return htmlResult("Token exchange returned no access_token.", false, publicOrigin(request));
@@ -148,6 +158,7 @@ async function persistUserToken(
     /* debug_token is best-effort */
   }
 
+  await sql`update token_vault set is_valid = false where user_id = ${userId} and is_valid = true`;
   await sql`
     insert into token_vault (
       id, user_id, name, user_token_enc, long_lived_token_enc, expires_at,
@@ -169,17 +180,20 @@ export async function importFacebookAccounts(userId: string, userToken: string, 
     category?: string;
     fan_count?: number;
     tasks?: string[];
+    picture?: { data?: { url?: string; is_silhouette?: boolean } };
   }>({
     path: "/me/accounts",
     token: userToken,
     appSecret,
-    query: { fields: "id,name,access_token,category,category_list,fan_count,tasks" },
+    query: { fields: "id,name,access_token,category,category_list,fan_count,tasks,picture{url,is_silhouette}" },
   });
 
   let imported = 0;
   for (const acct of accounts) {
     const tasks = acct.tasks ?? null;
     const canCreate = tasks ? tasks.includes("CREATE_CONTENT") : true;
+    const pictureUrl =
+      acct.picture?.data?.url && !acct.picture.data.is_silhouette ? acct.picture.data.url : null;
     const existing = await sql<{ id: string }>`
       select id from pages where user_id = ${userId} and facebook_page_id = ${acct.id}
     `;
@@ -189,6 +203,7 @@ export async function importFacebookAccounts(userId: string, userToken: string, 
           name = ${acct.name},
           category = ${acct.category ?? null},
           fan_count = ${acct.fan_count ?? 0},
+          picture_url = coalesce(${pictureUrl}, picture_url),
           tasks_json = coalesce(${tasks ? JSON.stringify(tasks) : null}, tasks_json),
           access_token_enc = coalesce(${acct.access_token ? encryptSecret(acct.access_token) : null}, access_token_enc),
           is_read_only = coalesce(${tasks ? !canCreate : null}, is_read_only),
@@ -200,16 +215,26 @@ export async function importFacebookAccounts(userId: string, userToken: string, 
       await sql`
         insert into pages (
           id, user_id, facebook_page_id, name, category, fan_count, tasks_json,
-          access_token_enc, is_active, is_read_only, is_practice
+          access_token_enc, is_active, is_read_only, is_practice, picture_url
         ) values (
           ${randomUUID()}, ${userId}, ${acct.id}, ${acct.name}, ${acct.category ?? null},
           ${acct.fan_count ?? 0}, ${JSON.stringify(tasks ?? [])},
           ${acct.access_token ? encryptSecret(acct.access_token) : null},
-          true, ${!canCreate}, false
+          true, ${!canCreate}, false, ${pictureUrl}
         )
       `;
     }
     imported += 1;
+  }
+  if (imported > 0) {
+    await setSetting(userId, "hide_practice", "1", false);
+    const firstLive = await sql<{ id: string }>`
+      select id from pages
+      where user_id = ${userId} and is_practice = false and is_active = true
+      order by name
+      limit 1
+    `;
+    if (firstLive[0]?.id) await setSetting(userId, "default_page_id", firstLive[0].id, false);
   }
   return imported;
 }
@@ -286,8 +311,9 @@ async function exchangeCode(
   appSecret: string,
   code: string,
   request: Request,
+  storedRedirect?: string | null,
 ): Promise<{ access_token?: string; expires_in?: number }> {
-  const candidates = redirectCandidates(request);
+  const candidates = redirectCandidates(request, storedRedirect);
   let last: Error | null = null;
   for (const redirect_uri of candidates) {
     try {
@@ -301,7 +327,7 @@ async function exchangeCode(
       last = e instanceof Error ? e : new Error(String(e));
     }
   }
-  throw last ?? new Error("Token exchange failed.");
+  throw last ?? new Error("Token exchange failed. The Redirect URI on the Facebook App must be exactly http://127.0.0.1:8080/api/facebook/callback");
 }
 
 async function rememberError(userId: string, message: string, origin: string) {
@@ -346,9 +372,18 @@ function htmlResult(message: string, ok: boolean, origin: string): Response {
   } catch {
     /* keep origin */
   }
+  const loopback = hostname === "127.0.0.1" || hostname === "localhost" || hostname === "::1";
   const extra = ok
-    ? `<p style="color:#65676B;font-size:13px">This window will close.</p>`
-    : `<div style="margin-top:16px;padding:12px;background:#fff;border-radius:8px;font-size:13px;line-height:1.45;color:#050505">
+    ? `<p style="color:#65676B;font-size:13px">You can close this tab and go back to PosterPal.</p>`
+    : loopback
+      ? `<div style="margin-top:16px;padding:12px;background:#fff;border-radius:8px;font-size:13px;line-height:1.45;color:#050505">
+        <p style="margin:0 0 8px"><strong>On the Windows app, Facebook Login is loopback-only.</strong> Leave App Domains empty (Facebook rejects IP addresses). Put exactly this Redirect URI in Facebook Login → Settings → Valid OAuth Redirect URIs:</p>
+        <code style="display:block;padding:8px;background:#F0F2F5;border-radius:6px;word-break:break-all">http://127.0.0.1:8080/api/facebook/callback</code>
+        <p style="margin:12px 0 0">Client OAuth Login and Web OAuth Login ON. You must be Admin/Developer/Tester. Display name PosterPal. Save Changes, wait 30 seconds, Connect again from the Windows window (not the phone).</p>
+        <p style="margin:12px 0 0">Still stuck: Graph API Explorer → select <em>your</em> app → grant the Pages permissions → Generate Access Token → paste it in PosterPal Settings. Never paste App Secret in chat.</p>
+      </div>
+      <p style="margin-top:16px"><button onclick="window.close()" style="padding:8px 14px;border:0;border-radius:6px;background:#1877F2;color:#fff;font-weight:600;cursor:pointer">Close</button></p>`
+      : `<div style="margin-top:16px;padding:12px;background:#fff;border-radius:8px;font-size:13px;line-height:1.45;color:#050505">
         <p style="margin:0 0 8px"><strong>Facebook “domain isn’t included”</strong> — add these three, then Save Changes:</p>
         <p style="margin:8px 0 0">App Domains (Settings → Basic)</p>
         <code style="display:block;padding:8px;background:#F0F2F5;border-radius:6px;word-break:break-all">${escapeHtml(hostname)}</code>

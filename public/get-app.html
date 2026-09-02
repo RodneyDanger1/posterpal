@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Get PosterPal on your phone</title>
+    <style>
+      :root { color-scheme: dark; }
+      body { font-family: Segoe UI, system-ui, sans-serif; margin: 0; min-height: 100dvh; background: #0b1220; color: #e8eef7; }
+      main { max-width: 520px; margin: 0 auto; padding: 28px 20px 48px; }
+      h1 { font-size: 22px; margin: 0 0 8px; }
+      p, li { color: #9aa8bc; font-size: 14px; line-height: 1.5; }
+      code, .url { background: #152033; padding: 2px 6px; border-radius: 6px; color: #e8eef7; word-break: break-all; }
+      .card { background: #152033; border-radius: 16px; padding: 20px; margin-top: 16px; }
+      a.btn, button { display: block; text-align: center; text-decoration: none; margin-top: 12px; border: 0; border-radius: 10px; padding: 14px; font-weight: 700; background: #1877F2; color: #fff; font-size: 16px; width: 100%; box-sizing: border-box; cursor: pointer; }
+      a.btn.secondary { background: #24344c; }
+      .ok { color: #6ee7a8; }
+      .bad { color: #ff8a8a; }
+      ol { padding-left: 1.2em; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Install the Android app</h1>
+      <p>
+        This page is served by the PosterPal window on your PC. No Docker. The APK is a thin
+        viewer of <em>this</em> desk — Facebook Login stays on the PC.
+      </p>
+      <div class="card">
+        <p id="status">Checking for the APK…</p>
+        <a class="btn" id="dl" href="/api/apk" download="PosterPal.apk" hidden>Download PosterPal.apk</a>
+        <button type="button" class="btn secondary" id="copy">Copy this page’s address</button>
+      </div>
+      <div class="card">
+        <p style="margin-top:0;color:#e8eef7;font-weight:600">On the phone</p>
+        <ol>
+          <li>Same Wi‑Fi as the PC. Keep PosterPal open on Windows (tray is enough).</li>
+          <li>Open this page in Chrome: <span class="url" id="here"></span></li>
+          <li>Tap Download. Android will warn that the file is from this site — that’s expected for a sideload.</li>
+          <li>Allow install from Chrome / Files if asked. Open the APK.</li>
+          <li>Paste the desk URL (same host as this page, without <code>/get-app.html</code>).</li>
+        </ol>
+        <p>If download fails, Windows Firewall is blocking port 8080. Run <code>PosterPal.bat</code> as Administrator once, or allow Node/PosterPal through Private networks.</p>
+      </div>
+    </main>
+    <script>
+      const here = location.origin + "/get-app.html";
+      document.getElementById("here").textContent = here;
+      document.getElementById("copy").onclick = async () => {
+        try { await navigator.clipboard.writeText(here); } catch (e) {}
+        document.getElementById("copy").textContent = "Copied";
+      };
+      fetch("/api/apk", { method: "HEAD", cache: "no-store" })
+        .then((r) => {
+          const status = document.getElementById("status");
+          const dl = document.getElementById("dl");
+          if (r.ok) {
+            status.innerHTML = '<span class="ok">APK is ready on this desk.</span>';
+            dl.hidden = false;
+          } else {
+            status.innerHTML = '<span class="bad">APK is not on this PC yet.</span> Build it on Windows with <code>npm run mobile:apk</code>, then reload this page.';
+          }
+        })
+        .catch(() => {
+          document.getElementById("status").innerHTML = '<span class="bad">Could not reach the desk. Is PosterPal still open on the PC?</span>';
+        });
+    </script>
+  </body>
+</html>

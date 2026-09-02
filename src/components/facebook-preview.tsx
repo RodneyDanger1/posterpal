@@ -20,7 +20,7 @@ export function FacebookPreview({
   when,
   mode,
 }: {
-  page: Pick<PageRow, "id" | "name"> | null;
+  page: Pick<PageRow, "id" | "name" | "picture_url"> | null;
   message: string;
   link?: string;
   firstComment?: string;
@@ -47,7 +47,7 @@ export function FacebookPreview({
       </div>
       <article className="p-3">
         <div className="flex items-start gap-2">
-          <PageAvatar id={page?.id ?? "page"} name={page?.name ?? "Page"} size={40} />
+          <PageAvatar id={page?.id ?? "page"} name={page?.name ?? "Page"} pictureUrl={page?.picture_url} size={40} />
           <div className="min-w-0">
             <div className="text-[15px] font-semibold leading-tight">{page?.name ?? "Page"}</div>
             <div className="flex items-center gap-1 text-[12px] text-muted-foreground">

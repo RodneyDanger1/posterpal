@@ -5,6 +5,7 @@ export type FacebookDomainHints = {
   siteUrl: string;
   redirectUri: string;
   isLoopback: boolean;
+  isPrivateLan: boolean;
 };
 
 export function facebookDomainHints(origin?: string): FacebookDomainHints {
@@ -21,10 +22,22 @@ export function facebookDomainHints(origin?: string): FacebookDomainHints {
     /* keep defaults */
   }
   const isLoopback = hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
+  const isPrivateLan =
+    isLoopback ||
+    hostname.startsWith("10.") ||
+    hostname.startsWith("192.168.") ||
+    hostname.startsWith("169.254.") ||
+    (() => {
+      const m = /^172\.(\d+)\./.exec(hostname);
+      if (!m) return false;
+      const n = Number(m[1]);
+      return n >= 16 && n <= 31;
+    })();
   return {
     hostname,
     siteUrl,
     redirectUri: `${siteUrl}/api/facebook/callback`,
     isLoopback,
+    isPrivateLan,
   };
 }

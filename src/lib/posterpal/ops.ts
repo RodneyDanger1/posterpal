@@ -1,6 +1,11 @@
+/**
+ * PosterPal operations — all mutating desk work lives here.
+ * Server functions in fns.ts are thin auth wrappers. React never imports this file.
+ * Failures go to deskLog + scheduler_logs; never empty-catch Graph.
+ */
 import { randomBytes, randomUUID } from "node:crypto";
 import { getSql } from "@/lib/db";
-import { analyzeContent, aiAvailable, draftReplies, generateCaptionVariants, generateImageWithProvider, localSentiment, suggestHashtags } from "./ai";
+import { analyzeContent, aiAvailable, chatWithProvider, draftReplies, generateCaptionVariants, generateImageWithProvider, localSentiment, suggestHashtags } from "./ai";
 import { GRAPH_VERSION, REQUIRED_SCOPES } from "./constants";
 import { buildAuthorizeUrl, facebookScheduleWindow, graphFetch, GraphRequestError, unixSeconds } from "./graph";
 import {
@@ -25,7 +30,7 @@ import {
   setSetting,
 } from "./repo";
 import { policyForComposer, publishExisting, saveAndDispatch, tickScheduler, attemptGraphPublish } from "./publish";
-import { ensureMemory, ensureOverduePractice, seedPracticeWorkspace } from "./seed";
+import { ensureMemory, ensureOverduePractice, expandPracticeFleet, seedPracticeWorkspace } from "./seed";
 import { syncFromGraph } from "./sync";
 import { refreshVaultTokens } from "./facebook-oauth";
 import { deleteIdea, deleteSnippet, listIdeas, listSnippets, saveIdea, saveSnippet, updateIdea } from "./memory";
@@ -39,10 +44,12 @@ import {
   revokeDevice as revokePairedDevice,
 } from "./devices";
 
+/** Valid Page id, or the first Page when omitted. A stale id stays undefined —
+ *  never remapped onto pages[0] (that posted Winona captions on North Shore). */
 async function resolvePageId(userId: string, pageId?: string | null): Promise<string | undefined> {
   if (pageId) {
     const page = await getPage(userId, pageId);
-    if (page) return page.id;
+    return page?.id;
   }
   const pages = await listPagesRepo(userId);
   return pages[0]?.id;
@@ -60,20 +67,27 @@ function originFromRequest(): string {
 
 export async function bootstrapApp(userId: string) {
   const host = process.env.VITE_PUBLIC_HOSTNAME;
-  const origin = host ? `https://${host}` : originFromRequest() || "https://localhost";
+  const origin = host
+    ? `https://${host.replace(/^https?:\/\//, "").replace(/\/$/, "")}`
+    : originFromRequest() || "http://127.0.0.1:8080";
   let pages = await listPagesRepo(userId);
   if (pages.length === 0) {
     await seedPracticeWorkspace(userId);
     await setSetting(userId, "setup_complete", "1", false);
     pages = await listPagesRepo(userId);
   } else {
+    await expandPracticeFleet(userId);
     await ensureMemory(userId);
     await ensureOverduePractice(userId);
+    pages = await listPagesRepo(userId);
   }
   const settings = await loadSettings(userId, origin);
   const recentPosts = await listPostsRepo(userId, { limit: 12 });
-  const dueSoon = (await listPostsRepo(userId, { limit: 40 })).filter(
-    (p) => p.status === "LocalScheduled" || p.status === "FacebookScheduled",
+  const dueLocal = await listPostsRepo(userId, { status: "LocalScheduled", limit: 24 });
+  const dueFb = await listPostsRepo(userId, { status: "FacebookScheduled", limit: 24 });
+  const dueSoon = [...dueLocal, ...dueFb].sort(
+    (a, b) =>
+      new Date(a.scheduled_publish_time ?? 0).getTime() - new Date(b.scheduled_publish_time ?? 0).getTime(),
   );
   const quota = await latestQuota(userId);
   const inbox = await inboxCount(userId);
@@ -132,7 +146,7 @@ export async function bootstrapApp(userId: string) {
   return {
     pages,
     recentPosts,
-    dueSoon: dueSoon.slice(0, 8),
+    dueSoon: dueSoon.slice(0, 24),
     inboxCount: inbox,
     quota,
     settings,
@@ -142,20 +156,58 @@ export async function bootstrapApp(userId: string) {
     mix,
     pageMetrics,
     needs: await needsYouSafe(userId),
+    collisions: await collisionReport(userId),
+    week: await weekPlanner(userId),
   };
+}
+
+async function collisionReport(userId: string): Promise<import("./types").CollisionHit[]> {
+  try {
+    const sql = await getSql();
+    const rows = await sql<{ page_id: string; page_name: string; message: string }>`
+      select po.page_id, pa.name as page_name, po.message
+      from posts po join pages pa on pa.id = po.page_id
+      where po.user_id = ${userId}
+        and po.message is not null and po.message <> ''
+        and po.status in ('Published', 'FacebookScheduled', 'LocalScheduled', 'LocalDraft')
+      order by po.created_at desc
+      limit 80
+    `;
+    const { findCollisions } = await import("./briefing");
+    return findCollisions(
+      rows.map((r) => ({ pageId: r.page_id, pageName: r.page_name, message: r.message })),
+    );
+  } catch {
+    return [];
+  }
 }
 
 export async function getSettings(userId: string) {
   const host = process.env.VITE_PUBLIC_HOSTNAME;
-  const origin = host ? `https://${host}` : originFromRequest() || "http://localhost:8080";
+  const { canonicalOrigin, desktopLoopbackCallback } = await import("./oauth-origin");
+  const origin = host
+    ? `https://${host.replace(/^https?:\/\//, "").replace(/\/$/, "")}`
+    : canonicalOrigin(originFromRequest() || desktopLoopbackCallback().replace(/\/api\/facebook\/callback$/, ""));
   return loadSettings(userId, origin);
 }
 
 export async function saveFacebookApp(userId: string, data: { appId: string; appSecret: string }) {
-  await setSetting(userId, "facebook_app_id", data.appId.trim(), false);
+  const { looksLikeAppId } = await import("./meta-setup");
+  const appId = data.appId.trim();
+  if (!looksLikeAppId(appId)) {
+    throw new Error("App ID is digits only (5–20). Copy it from Meta App Dashboard → Settings → Basic, not the display name.");
+  }
+  await setSetting(userId, "facebook_app_id", appId, false);
   if (data.appSecret.trim()) {
     await setSetting(userId, "facebook_app_secret", data.appSecret.trim(), true);
   }
+  const { deskLog } = await import("./log");
+  await deskLog({
+    level: "info",
+    scope: "facebook.app",
+    userId,
+    message: `Saved App ID ${appId.slice(0, 6)}…${data.appSecret.trim() ? " + secret" : " (id only)"}`,
+  });
   return { ok: true as const };
 }
 
@@ -189,9 +241,30 @@ async function providerKey(userId: string, provider: string): Promise<string | n
 
 export async function savePrefs(
   userId: string,
-  data: { theme?: "light" | "dark"; defaultPageId?: string | null; cadenceWarn?: number; cadenceBlock?: number },
+  data: {
+    theme?: "light" | "dark";
+    defaultPageId?: string | null;
+    cadenceWarn?: number;
+    cadenceBlock?: number;
+    /** When set, cadence writes to THIS Page only. Unique Pages must not share a cap. */
+    pageId?: string | null;
+    timezone?: string;
+    hidePractice?: boolean;
+    defaultTextProvider?: string;
+    defaultImageProvider?: string;
+  },
 ) {
   if (data.theme) await setSetting(userId, "theme", data.theme, false);
+  if (data.defaultTextProvider) await setSetting(userId, "default_text_provider", data.defaultTextProvider, false);
+  if (data.defaultImageProvider) await setSetting(userId, "default_image_provider", data.defaultImageProvider, false);
+  if (data.timezone) {
+    const { isIanaTimeZone } = await import("./operator");
+    if (!isIanaTimeZone(data.timezone)) throw new Error("Unknown time zone.");
+    await setSetting(userId, "timezone", data.timezone, false);
+  }
+  if (data.hidePractice !== undefined) {
+    await setSetting(userId, "hide_practice", data.hidePractice ? "1" : "0", false);
+  }
   if (data.defaultPageId !== undefined) {
     await setSetting(userId, "default_page_id", data.defaultPageId, false);
   }
@@ -207,12 +280,17 @@ export async function savePrefs(
   }
   if (data.cadenceWarn !== undefined || data.cadenceBlock !== undefined) {
     const sql = await getSql();
-    await sql`
-      update pages set
-        cadence_warn_per_24h = coalesce(${data.cadenceWarn ?? null}, cadence_warn_per_24h),
-        cadence_block_per_24h = coalesce(${data.cadenceBlock ?? null}, cadence_block_per_24h)
-      where user_id = ${userId}
-    `;
+    if (data.pageId) {
+      await sql`
+        update pages set
+          cadence_warn_per_24h = coalesce(${data.cadenceWarn ?? null}, cadence_warn_per_24h),
+          cadence_block_per_24h = coalesce(${data.cadenceBlock ?? null}, cadence_block_per_24h),
+          updated_at = now()
+        where user_id = ${userId} and id = ${data.pageId}
+      `;
+    }
+    // Desk-wide defaults stay in app_settings. Do NOT stamp every Page —
+    // a 10-Page fleet has different warn/block per identity.
   }
   return { ok: true as const };
 }
@@ -224,8 +302,16 @@ export async function completeSetup(userId: string) {
 
 export async function startPractice(userId: string) {
   await seedPracticeWorkspace(userId);
+  await expandPracticeFleet(userId);
   await setSetting(userId, "setup_complete", "1", false);
   return { ok: true as const };
+}
+
+export async function startFleetPractice(userId: string) {
+  await seedPracticeWorkspace(userId);
+  const added = await expandPracticeFleet(userId);
+  await setSetting(userId, "setup_complete", "1", false);
+  return { ok: true as const, added };
 }
 
 export async function beginFacebookOAuth(userId: string, redirectUri: string) {
@@ -233,16 +319,31 @@ export async function beginFacebookOAuth(userId: string, redirectUri: string) {
   if (!appId) throw new Error("Enter your Facebook App ID first.");
   const secret = await getSetting(userId, "facebook_app_secret");
   if (!secret) throw new Error("Enter your Facebook App Secret and click Save credentials first.");
-  await setSetting(userId, "facebook_last_redirect", redirectUri, false);
+  const { canonicalOrigin } = await import("./oauth-origin");
+  let redirect = redirectUri;
+  try {
+    const u = new URL(redirectUri);
+    redirect = `${canonicalOrigin(u.origin)}${u.pathname}`;
+  } catch {
+    /* keep */
+  }
+  await setSetting(userId, "facebook_last_redirect", redirect, false);
   await setSetting(userId, "facebook_last_error", null, false);
   const state = randomBytes(24).toString("hex");
   const sql = await getSql();
-  await sql`
-    insert into oauth_states (state, user_id, expires_at)
-    values (${state}, ${userId}, now() + interval '15 minutes')
-  `;
-  const url = buildAuthorizeUrl({ clientId: appId, redirectUri, state });
-  return { url, state, version: GRAPH_VERSION, scopes: [...REQUIRED_SCOPES], redirectUri };
+  try {
+    await sql`
+      insert into oauth_states (state, user_id, expires_at, redirect_uri)
+      values (${state}, ${userId}, now() + interval '15 minutes', ${redirect})
+    `;
+  } catch {
+    await sql`
+      insert into oauth_states (state, user_id, expires_at)
+      values (${state}, ${userId}, now() + interval '15 minutes')
+    `;
+  }
+  const url = buildAuthorizeUrl({ clientId: appId, redirectUri: redirect, state });
+  return { url, state, version: GRAPH_VERSION, scopes: [...REQUIRED_SCOPES], redirectUri: redirect };
 }
 
 export async function facebookConnectStatus(userId: string) {
@@ -275,8 +376,12 @@ export async function listPosts(
   userId: string,
   opts: { pageId?: string; status?: string; limit?: number } = {},
 ) {
-  const pageId = opts.pageId ? await resolvePageId(userId, opts.pageId) : undefined;
-  return listPostsRepo(userId, { ...opts, pageId });
+  if (opts.pageId) {
+    const pageId = await resolvePageId(userId, opts.pageId);
+    if (!pageId) return [];
+    return listPostsRepo(userId, { ...opts, pageId });
+  }
+  return listPostsRepo(userId, opts);
 }
 
 export async function getPostBundle(userId: string, postId: string) {
@@ -299,9 +404,14 @@ export async function policy(
     hasImages: boolean;
     missingAlt: boolean;
     createdWithAi: boolean;
+    mediaType?: string;
   },
 ) {
-  return policyForComposer(userId, data.pageId, data.message, data);
+  const cadence = data.mediaType === "Reel" ? await cadenceForPage(userId, data.pageId) : null;
+  return policyForComposer(userId, data.pageId, data.message, {
+    ...data,
+    reelLast24h: cadence?.reelLast24h,
+  });
 }
 
 export async function compose(userId: string, data: ComposerInput) {
@@ -310,20 +420,44 @@ export async function compose(userId: string, data: ComposerInput) {
   const primary = await saveAndDispatch(userId, primaryInput);
   const extras: Array<{ id: string; status: string; pageId: string; warning: string | null }> = [];
   const failures: string[] = [];
+  const { remixCaption } = await import("./briefing");
   for (const pageId of extraIds) {
     const page = await getPage(userId, pageId);
     try {
-      const result = await saveAndDispatch(userId, { ...primaryInput, pageId });
+      // Unique Pages: extras are LocalDrafts for remix. Publishing the same
+      // caption on 10 Pages is the inauthentic-behavior pattern Meta bans.
+      const result = await saveAndDispatch(userId, {
+        ...primaryInput,
+        pageId,
+        message: remixCaption(primaryInput.message),
+        mode: "local-draft",
+      });
       extras.push({ id: result.id, status: result.status, pageId, warning: result.warning });
     } catch (e) {
       failures.push(`${page?.name ?? pageId}: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
   const extraNote = extras.length
-    ? ` Also ${primaryInput.mode === "local-draft" ? "saved" : "queued"} on ${extras.length} other Page${extras.length === 1 ? "" : "s"}.`
+    ? ` Also saved ${extras.length} unique-Page draft${extras.length === 1 ? "" : "s"} for remix — edit each in this Page's voice before sending. Identical copy across Pages is a spam risk.`
     : "";
   const failNote = failures.length ? ` Extra Pages failed — ${failures.join("; ")}` : "";
+  if (failures.length) {
+    const { deskLog } = await import("./log");
+    await deskLog({
+      level: "warn",
+      scope: "compose.extra",
+      userId,
+      message: failNote.trim(),
+    });
+  }
   const warning = `${primary.warning ?? ""}${extraNote}${failNote}`.trim() || null;
+  const { deskLog } = await import("./log");
+  await deskLog({
+    level: failures.length ? "warn" : "info",
+    scope: "compose",
+    userId,
+    message: `${data.mode} ${data.mediaType}${extras.length ? ` +${extras.length} remix drafts` : ""}`,
+  });
   return { ...primary, extraCount: extras.length, extraIds: extras.map((e) => e.id), warning };
 }
 
@@ -343,12 +477,13 @@ export async function clonePost(
   if (pageIds.length === 0) throw new Error("Pick at least one Page to clone onto.");
   const results: Array<{ id: string; status: string; pageId: string }> = [];
   const failures: string[] = [];
+  const { remixCaption } = await import("./briefing");
   for (const pageId of pageIds) {
     const page = await getPage(userId, pageId);
     try {
       const result = await saveAndDispatch(userId, {
         pageId,
-        message: post.message ?? "",
+        message: pageId === post.page_id ? (post.message ?? "") : remixCaption(post.message ?? ""),
         link: post.link,
         firstComment: post.first_comment,
         mediaType: post.media_type,
@@ -373,15 +508,193 @@ export async function clonePost(
   if (results.length === 0) {
     throw new Error(failures[0] ?? "Could not clone this post.");
   }
+  const other = pageIds.some((id) => id !== post.page_id);
+  const remix = other
+    ? "Cloned as LocalDrafts — rewrite each caption in that Page's voice before sending. Identical copy across unique Pages is a spam risk."
+    : "Copy saved on this Page. Same-Page evergreen is allowed; still review before Send.";
+  const { deskLog } = await import("./log");
+  await deskLog({
+    level: failures.length ? "warn" : "info",
+    scope: "clone",
+    userId,
+    message: `cloned ${results.length}${failures.length ? `, ${failures.length} failed` : ""}`,
+  });
   return {
     cloned: results.length,
     results,
-    warning: failures.length ? failures.join("; ") : null,
+    warning: failures.length ? `${remix} ${failures.join("; ")}` : remix,
   };
 }
 
+export async function restoreCancelled(userId: string, postId: string) {
+  const sql = await getSql();
+  const post = await getPost(userId, postId);
+  if (!post) throw new Error("Post not found");
+  if (post.status !== "Cancelled") throw new Error("Only cancelled posts can be restored.");
+  await sql`
+    update posts set status = 'LocalDraft', error_message = null, updated_at = now()
+    where id = ${postId} and user_id = ${userId}
+  `;
+  return { ok: true as const, status: "LocalDraft" as const };
+}
+
+export async function duplicateNextWeek(userId: string, postId: string) {
+  const post = await getPost(userId, postId);
+  if (!post) throw new Error("Post not found");
+  const { plusDaysIso } = await import("./slots");
+  const source = post.scheduled_publish_time ?? post.published_time ?? post.created_at;
+  let when = plusDaysIso(source, 7);
+  if (new Date(when).getTime() < Date.now() + 15 * 60_000) {
+    when = plusDaysIso(new Date().toISOString(), 7);
+  }
+  return clonePost(userId, {
+    postId,
+    pageIds: [post.page_id],
+    mode: "schedule",
+    scheduledAt: when,
+  });
+}
+
+export async function savePostingSlots(userId: string, data: { pageId: string; slots: Array<{ day: number; hour: number }> }) {
+  const sql = await getSql();
+  const page = await getPage(userId, data.pageId);
+  if (!page) throw new Error("Page not found");
+  const { serializeSlots } = await import("./slots");
+  const json = serializeSlots(data.slots);
+  await sql`
+    update pages set posting_slots_json = ${json}, updated_at = now()
+    where id = ${data.pageId} and user_id = ${userId}
+  `;
+  return { ok: true as const, slots: json };
+}
+
+export async function unfurlLink(_userId: string, raw: string) {
+  const { unfurlHostBlocked, parseOgTags } = await import("./slots");
+  const v = raw.trim();
+  if (!v) throw new Error("Paste a URL.");
+  let url: URL;
+  try {
+    url = new URL(/^https?:\/\//i.test(v) ? v : `https://${v}`);
+  } catch {
+    throw new Error("That is not a URL.");
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") throw new Error("Use http or https.");
+  if (unfurlHostBlocked(url.hostname)) {
+    throw new Error("That host is blocked (local, private, or facebook.com). Unfurl your shop URL, not Facebook.");
+  }
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), 4000);
+  try {
+    const res = await fetch(url.toString(), {
+      signal: ctrl.signal,
+      redirect: "follow",
+      headers: { Accept: "text/html", "User-Agent": "PosterPal/1.0 (link preview)" },
+    });
+    if (!res.ok) throw new Error(`Preview failed (HTTP ${res.status}).`);
+    let finalHost = url.hostname;
+    try {
+      finalHost = new URL(res.url).hostname;
+    } catch {
+      /* keep the original host */
+    }
+    if (unfurlHostBlocked(finalHost)) {
+      throw new Error("That host is blocked (local, private, or facebook.com). Unfurl your shop URL, not Facebook.");
+    }
+    const ctype = res.headers.get("content-type") ?? "";
+    if (!ctype.includes("text/html") && !ctype.includes("application/xhtml")) {
+      return { url: url.toString(), title: url.hostname, description: null, image: null, host: finalHost };
+    }
+    const html = (await res.text()).slice(0, 120_000);
+    const og = parseOgTags(html);
+    return {
+      url: url.toString(),
+      title: og.title ?? url.hostname,
+      description: og.description,
+      image: og.image && og.image.startsWith("https://") ? og.image : null,
+      host: finalHost,
+    };
+  } catch (e) {
+    throw new Error(e instanceof Error ? e.message : "Preview failed");
+  } finally {
+    clearTimeout(t);
+  }
+}
+
+export async function exportQueueCsv(userId: string, pageId?: string) {
+  const posts = await listPostsRepo(userId, { pageId, limit: 200 });
+  const queued = posts.filter(
+    (p) => p.status === "LocalScheduled" || p.status === "FacebookScheduled" || p.status === "LocalDraft",
+  );
+  const escape = (s: string) => `"${s.replaceAll('"', '""')}"`;
+  const header = "page,status,when,caption,link";
+  const lines = queued.map((p) =>
+    [
+      escape(p.page_name ?? ""),
+      p.status,
+      p.scheduled_publish_time ?? "",
+      escape(p.message ?? ""),
+      p.link ?? "",
+    ].join(","),
+  );
+  return [header, ...lines].join("\n");
+}
+
+async function weekPlanner(userId: string) {
+  const { buildWeekStrip } = await import("./slots");
+  try {
+    const sql = await getSql();
+    const start = new Date();
+    start.setHours(0, 0, 0, 0);
+    const end = new Date(start);
+    end.setDate(end.getDate() + 7);
+    const rows = await sql<{
+      scheduled_publish_time: string | null;
+      published_time: string | null;
+      created_at: string;
+      status: string;
+    }>`
+      select scheduled_publish_time, published_time, created_at, status
+      from posts
+      where user_id = ${userId}
+        and status not in ('Cancelled')
+        and coalesce(scheduled_publish_time, published_time, created_at) >= ${start.toISOString()}
+        and coalesce(scheduled_publish_time, published_time, created_at) < ${end.toISOString()}
+    `;
+    return buildWeekStrip(rows, start);
+  } catch (e) {
+    const { deskLog } = await import("./log");
+    await deskLog({
+      level: "warn",
+      scope: "weekPlanner",
+      userId,
+      message: e instanceof Error ? e.message : String(e),
+    });
+    return buildWeekStrip([]);
+  }
+}
+
 export async function publishNow(userId: string, postId: string) {
-  return publishExisting(userId, postId, "now");
+  const { deskLog } = await import("./log");
+  try {
+    const result = await publishExisting(userId, postId, "now");
+    await deskLog({
+      level: result.status === "Failed" ? "error" : "info",
+      scope: "graph.publish",
+      userId,
+      message: `publishNow ${result.status}${result.warning ? ` — ${String(result.warning).slice(0, 120)}` : ""}`,
+      extra: { postId },
+    });
+    return result;
+  } catch (e) {
+    await deskLog({
+      level: "error",
+      scope: "graph.publish",
+      userId,
+      message: e instanceof Error ? e.message : String(e),
+      extra: { postId },
+    });
+    throw e;
+  }
 }
 
 /** Resolve a CSV row's page reference to a real page id: exact id match or
@@ -478,6 +791,7 @@ export async function rssDrafts(userId: string): Promise<number> {
   `;
   if (feeds.length === 0) return 0;
   const { fetchFeedItems } = await import("./rss");
+  const { remixCaption } = await import("./briefing");
   let drafted = 0;
   for (const feed of feeds) {
     let items;
@@ -494,17 +808,32 @@ export async function rssDrafts(userId: string): Promise<number> {
       continue;
     }
     for (const item of items) {
-      const message = item.link ? `${item.title}\n${item.link}` : item.title;
+      const raw = item.link ? `${item.title}\n${item.link}` : item.title;
+      const message = remixCaption(raw);
       const dup = await sql<{ n: number }>`
         select count(*)::int as n from posts
-        where user_id = ${userId} and page_id = ${feed.page_id} and message = ${message}
+        where user_id = ${userId} and page_id = ${feed.page_id} and message in (${raw}, ${message})
       `;
       if ((dup[0]?.n ?? 0) > 0) continue;
-      await sql`
-        insert into posts (id, user_id, page_id, message, media_type, status, created_by_this_app)
-        values (${randomUUID()}, ${userId}, ${feed.page_id}, ${message}, 'Text', 'LocalDraft', true)
-      `;
-      drafted += 1;
+      try {
+        await saveAndDispatch(userId, {
+          pageId: feed.page_id,
+          message,
+          link: item.link,
+          mediaType: "Text",
+          mode: "local-draft",
+        });
+        drafted += 1;
+      } catch (e) {
+        await recordLog({
+          userId,
+          postId: "",
+          status: "rss_draft_failed",
+          error: e instanceof Error ? e.message : String(e),
+          path: "rss",
+        });
+        continue;
+      }
       await recordLog({
         userId,
         postId: "",
@@ -519,10 +848,12 @@ export async function rssDrafts(userId: string): Promise<number> {
 
 export async function saveRssFeed(userId: string, data: { pageId: string; feedUrl: string }) {
   const sql = await getSql();
-  await sql`
+  const rows = await sql<{ id: string }>`
     update pages set rss_feed_url = ${data.feedUrl.trim() || null}
     where id = ${data.pageId} and user_id = ${userId}
+    returning id
   `;
+  if (!rows[0]) throw new Error("Page not found.");
   return { ok: true };
 }
 
@@ -535,7 +866,7 @@ export async function reschedule(userId: string, data: { postId: string; schedul
   }
   const when = new Date(data.scheduledAt);
   if (Number.isNaN(when.getTime())) throw new Error("Pick a valid date and time.");
-  const windowNote = facebookScheduleWindow(when);
+  const windowNote = facebookScheduleWindow(when, new Date(), post.media_type);
   const page = await getPage(userId, post.page_id);
   const liveGraph =
     Boolean(page?.facebook_page_id) &&
@@ -663,6 +994,25 @@ export async function cancelPost(userId: string, postId: string) {
   return { ok: true as const };
 }
 
+/** HITL delete of a post this desk created. Official Graph DELETE, then local Cancelled. */
+export async function deletePublishedPost(userId: string, postId: string) {
+  const sql = await getSql();
+  const post = await getPost(userId, postId);
+  if (!post) throw new Error("Post not found");
+  if (!post.created_by_this_app) {
+    throw new Error("This desk can only delete posts it created. Open Facebook to remove older posts.");
+  }
+  if (post.facebook_post_id && !post.facebook_post_id.startsWith("practice_")) {
+    const token = await getPageToken(userId, post.page_id);
+    const secret = await getSetting(userId, "facebook_app_secret");
+    if (!token || !secret) throw new Error("Reconnect Facebook before deleting on Graph.");
+    await graphFetch({ path: `/${post.facebook_post_id}`, method: "DELETE", token, appSecret: secret });
+  }
+  await sql`update posts set status = 'Cancelled', updated_at = now() where id = ${postId} and user_id = ${userId}`;
+  await recordLog({ userId, postId, status: "deleted_on_graph", path: "inspector" });
+  return { ok: true as const };
+}
+
 export async function comments(userId: string, filter: "needs" | "hidden" | "all", pageId?: string) {
   if (pageId) {
     const page = await getPage(userId, pageId);
@@ -715,6 +1065,13 @@ export async function hideComment(userId: string, data: { commentId: string; hid
       needs_reply = ${data.hidden ? false : comment.needs_reply}
     where id = ${data.commentId} and user_id = ${userId}
   `;
+  const { deskLog } = await import("./log");
+  await deskLog({
+    level: "info",
+    scope: "inbox.hide",
+    userId,
+    message: data.hidden ? "Human hid a comment (HITL)" : "Human unhid a comment (HITL)",
+  });
   return { ok: true as const };
 }
 
@@ -754,6 +1111,13 @@ export async function sendReply(userId: string, data: { commentId: string; messa
   `;
   await sql`update comments set needs_reply = false where id = ${data.commentId} and user_id = ${userId}`;
   await recordLog({ userId, postId: comment.post_id, status: "reply_sent", path: "inbox" });
+  const { deskLog } = await import("./log");
+  await deskLog({
+    level: "info",
+    scope: "inbox.reply",
+    userId,
+    message: "Human sent a reply (HITL)",
+  });
   return { ok: true as const };
 }
 
@@ -776,12 +1140,18 @@ export async function generateReplyDrafts(userId: string, commentId: string) {
   if (!row) throw new Error("Comment not found");
   const post = await getPost(userId, row.post_id);
   const page = post ? await getPage(userId, post.page_id) : null;
+  const settings = await getSettings(userId);
+  const provider = (settings.defaultTextProvider || "grok") as TextProviderId;
+  const key = await providerKey(userId, provider);
+  const can = provider === "grok" ? aiAvailable() : Boolean(key);
   let drafts: string[];
-  if (aiAvailable()) {
+  if (can) {
     drafts = await draftReplies({
       comment: row.message,
       brandVoice: page?.brand_voice,
       pageName: page?.name ?? "Page",
+      provider,
+      apiKey: key,
     });
   } else {
     drafts = [
@@ -794,7 +1164,7 @@ export async function generateReplyDrafts(userId: string, commentId: string) {
     update comments set reply_drafts_json = ${JSON.stringify(drafts)}, sentiment = ${localSentiment(row.message)}
     where id = ${commentId} and user_id = ${userId}
   `;
-  return { drafts, ai: aiAvailable() };
+  return { drafts, ai: can, provider };
 }
 
 export const merch = listMerch;
@@ -829,6 +1199,9 @@ export async function analytics(userId: string, data: { pageId?: string; days: n
   const days = data.days === 7 || data.days === 90 ? data.days : 28;
   const since = new Date(Date.now() - days * 86_400_000).toISOString();
   const pageId = await resolvePageId(userId, data.pageId);
+  if (data.pageId && !pageId) {
+    return { rows: [], insightsLocked: false, fanCount: null, days };
+  }
   const raw = pageId
     ? await sql<AnalyticsPoint>`
         select id, message, published_time, created_at, reactions_count, comments_count,
@@ -857,12 +1230,17 @@ export async function analytics(userId: string, data: { pageId?: string; days: n
   };
 }
 
+function asAiFlag(v: unknown): boolean {
+  return v === true || v === "t" || v === 1 || v === "1";
+}
+
 export async function mediaLibrary(userId: string, pageId?: string): Promise<MediaLibraryItem[]> {
   const sql = await getSql();
   const id = await resolvePageId(userId, pageId);
-  const rows = id
+  if (pageId && !id) return [];
+  const posts = id
     ? await sql<MediaLibraryItem>`
-        select ci.id, ci.file_name, ci.media_kind, ci.alt_text, ci.data_url, pa.name as page_name, ci.mime_type, ci.created_with_ai
+        select ci.id, ci.file_name, ci.media_kind, ci.alt_text, ci.data_url, pa.name as page_name, ci.mime_type, ci.created_with_ai, ci.created_at
         from content_items ci
         join posts po on po.id = ci.post_id
         join pages pa on pa.id = po.page_id
@@ -871,7 +1249,7 @@ export async function mediaLibrary(userId: string, pageId?: string): Promise<Med
         limit 80
       `
     : await sql<MediaLibraryItem>`
-        select ci.id, ci.file_name, ci.media_kind, ci.alt_text, ci.data_url, pa.name as page_name, ci.mime_type, ci.created_with_ai
+        select ci.id, ci.file_name, ci.media_kind, ci.alt_text, ci.data_url, pa.name as page_name, ci.mime_type, ci.created_with_ai, ci.created_at
         from content_items ci
         join posts po on po.id = ci.post_id
         join pages pa on pa.id = po.page_id
@@ -879,14 +1257,64 @@ export async function mediaLibrary(userId: string, pageId?: string): Promise<Med
         order by ci.created_at desc
         limit 80
       `;
-  return rows.map((r) => ({
-    ...r,
-    created_with_ai:
-      r.created_with_ai === true ||
-      (r as { created_with_ai?: unknown }).created_with_ai === "t" ||
-      (r as { created_with_ai?: unknown }).created_with_ai === 1 ||
-      (r as { created_with_ai?: unknown }).created_with_ai === "1",
-  }));
+  let assets: MediaLibraryItem[] = [];
+  try {
+    const raw = id
+      ? await sql<{
+          id: string;
+          file_name: string;
+          media_kind: string;
+          alt_text: string | null;
+          data_url: string | null;
+          mime_type: string | null;
+          created_with_ai: unknown;
+          created_at: string;
+          provider: string | null;
+        }>`
+          select id, file_name, media_kind, alt_text, data_url, mime_type, created_with_ai, created_at, provider
+          from media_assets
+          where user_id = ${userId} and (page_id = ${id} or page_id is null)
+          order by created_at desc
+          limit 60
+        `
+      : await sql<{
+          id: string;
+          file_name: string;
+          media_kind: string;
+          alt_text: string | null;
+          data_url: string | null;
+          mime_type: string | null;
+          created_with_ai: unknown;
+          created_at: string;
+          provider: string | null;
+        }>`
+          select id, file_name, media_kind, alt_text, data_url, mime_type, created_with_ai, created_at, provider
+          from media_assets
+          where user_id = ${userId}
+          order by created_at desc
+          limit 60
+        `;
+    assets = raw.map((r) => ({
+      id: r.id,
+      file_name: r.file_name,
+      media_kind: r.media_kind,
+      alt_text: r.alt_text,
+      data_url: r.data_url,
+      page_name: r.provider ? `Library · ${r.provider}` : "Library",
+      mime_type: r.mime_type,
+      created_with_ai: asAiFlag(r.created_with_ai),
+      created_at: r.created_at,
+      provider: r.provider,
+    }));
+  } catch {
+    assets = [];
+  }
+  const merged = [
+    ...assets,
+    ...posts.map((r) => ({ ...r, created_with_ai: asAiFlag(r.created_with_ai) })),
+  ];
+  merged.sort((a, b) => String(b.created_at ?? "").localeCompare(String(a.created_at ?? "")));
+  return merged.slice(0, 80);
 }
 
 export async function generateVariants(
@@ -940,27 +1368,53 @@ export async function hashtags(userId: string, data: { pageId: string; caption: 
   return { tags, ai: true as const, provider };
 }
 
-export async function analyze(content: string) {
-  if (!aiAvailable()) {
+export async function analyze(userId: string, content: string, providerHint?: string) {
+  const settings = await getSettings(userId);
+  const provider = (providerHint || settings.defaultTextProvider || "grok") as TextProviderId;
+  const key = await providerKey(userId, provider);
+  const can = provider === "grok" ? aiAvailable() : Boolean(key);
+  if (!can) {
     return {
       sentiment: localSentiment(content),
       topics: [] as string[],
       riskFlags: [] as string[],
       suggestedHashtags: [] as string[],
       ai: false as const,
+      provider,
     };
   }
-  const a = await analyzeContent(content);
-  return { ...a, ai: true as const };
+  const a = await analyzeContent(content, { provider, apiKey: key });
+  return { ...a, ai: true as const, provider };
 }
 
 export async function updatePageVoice(userId: string, data: { pageId: string; brandVoice: string }) {
   const sql = await getSql();
-  await sql`
+  const rows = await sql<{ id: string }>`
     update pages set brand_voice = ${data.brandVoice}, updated_at = now()
     where id = ${data.pageId} and user_id = ${userId}
+    returning id
   `;
+  if (!rows[0]) throw new Error("Page not found.");
   return { ok: true as const };
+}
+
+export async function updatePageCadence(
+  userId: string,
+  data: { pageId: string; cadenceWarn: number; cadenceBlock: number },
+) {
+  const warn = Math.max(1, Number(data.cadenceWarn) || 8);
+  const block = Math.max(warn, Number(data.cadenceBlock) || 20);
+  const sql = await getSql();
+  const rows = await sql<{ id: string }>`
+    update pages set
+      cadence_warn_per_24h = ${warn},
+      cadence_block_per_24h = ${block},
+      updated_at = now()
+    where id = ${data.pageId} and user_id = ${userId}
+    returning id
+  `;
+  if (!rows[0]) throw new Error("Page not found.");
+  return { ok: true as const, cadenceWarn: warn, cadenceBlock: block };
 }
 
 export async function exportCsv(userId: string, data: { pageId?: string; days: number }) {
@@ -983,21 +1437,29 @@ export async function exportCsv(userId: string, data: { pageId?: string; days: n
 }
 
 export async function tick(userId: string) {
+  const { deskLog, stampTick } = await import("./log");
   try {
     await refreshVaultTokens(userId);
-  } catch {
-    /* keep ticking */
+  } catch (e) {
+    await deskLog({
+      level: "warn",
+      scope: "tick.vault",
+      userId,
+      message: e instanceof Error ? e.message : String(e),
+    });
   }
   let ran = 0;
   try {
     ran = await tickScheduler(userId);
   } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
     await recordLog({
       userId,
       status: "scheduler_tick_failed",
-      error: e instanceof Error ? e.message : String(e),
+      error: message,
       path: "tick",
     });
+    await deskLog({ level: "error", scope: "tick.scheduler", userId, message });
   }
   const last = await getSetting(userId, "last_graph_sync");
   const stale = !last || Date.now() - new Date(last).getTime() > 120_000;
@@ -1008,23 +1470,73 @@ export async function tick(userId: string) {
       try {
         sync = await syncFromGraph(userId);
         await setSetting(userId, "last_graph_sync", new Date().toISOString(), false);
-      } catch {
-        /* background sync must not break the tick */
+        if (sync.errors.length) {
+          await deskLog({
+            level: "warn",
+            scope: "tick.sync",
+            userId,
+            message: sync.errors.slice(0, 3).join("; "),
+          });
+        }
+      } catch (e) {
+        await deskLog({
+          level: "error",
+          scope: "tick.sync",
+          userId,
+          message: e instanceof Error ? e.message : String(e),
+        });
       }
     }
   }
+  try {
+    const { recycleDuePosts } = await import("./publish");
+    await recycleDuePosts(userId);
+  } catch (e) {
+    await deskLog({
+      level: "warn",
+      scope: "tick.recycle",
+      userId,
+      message: e instanceof Error ? e.message : String(e),
+    });
+  }
+  try {
+    await rssDrafts(userId);
+  } catch (e) {
+    await deskLog({
+      level: "warn",
+      scope: "tick.rss",
+      userId,
+      message: e instanceof Error ? e.message : String(e),
+    });
+  }
+  await stampTick(userId, "scheduler_last_tick");
+  await deskLog({
+    level: "info",
+    scope: "tick.done",
+    userId,
+    message: `scheduler published ${ran}; Graph sync ${sync ? "ran" : "skipped"}`,
+    extra: { ran, syncErrors: sync?.errors?.length ?? 0 },
+  });
   return { ran, sync };
 }
 
 export async function syncNow(userId: string): Promise<SyncResult> {
   const result = await syncFromGraph(userId);
   await setSetting(userId, "last_graph_sync", new Date().toISOString(), false);
+  const { deskLog } = await import("./log");
+  await deskLog({
+    level: result.errors.length ? "warn" : "info",
+    scope: "sync.now",
+    userId,
+    message: `${result.postsUpdated} posts, ${result.commentsImported} comments${result.errors.length ? `, ${result.errors.length} error(s)` : ""}`,
+  });
   return result;
 }
 
-export async function calendar(userId: string, pageId?: string) {
+export async function calendar(userId: string, pageId?: string, allPages = false) {
   const sql = await getSql();
-  const id = await resolvePageId(userId, pageId);
+  const id = allPages ? undefined : await resolvePageId(userId, pageId);
+  if (!allPages && pageId && !id) return [];
   const rows = id
     ? await sql<Record<string, string | number | null>>`
         select po.id, po.page_id, pa.name as page_name, po.message, po.status, po.media_type,
@@ -1066,17 +1578,113 @@ export const moveIdea = updateIdea;
 export const rememberSnippet = saveSnippet;
 export const forgetSnippet = deleteSnippet;
 
-export async function imaginePhoto(userId: string, prompt: string, provider?: string) {
+async function persistMediaAsset(
+  userId: string,
+  data: {
+    pageId?: string | null;
+    fileName: string;
+    mimeType?: string;
+    dataUrl: string;
+    prompt?: string;
+    provider?: string;
+    altText?: string;
+  },
+) {
+  const sql = await getSql();
+  const id = randomUUID();
+  const mime = data.mimeType || (data.dataUrl.startsWith("data:") ? data.dataUrl.slice(5, data.dataUrl.indexOf(";")) : "image/png");
+  try {
+    await sql`
+      insert into media_assets (
+        id, user_id, page_id, file_name, mime_type, media_kind, alt_text, data_url, prompt, provider, created_with_ai
+      ) values (
+        ${id}, ${userId}, ${data.pageId ?? null}, ${data.fileName}, ${mime}, ${"Photo"},
+        ${data.altText ?? data.prompt?.slice(0, 200) ?? null}, ${data.dataUrl},
+        ${data.prompt ?? null}, ${data.provider ?? null}, ${true}
+      )
+    `;
+    const extra = await sql<{ id: string }>`
+      select id from media_assets where user_id = ${userId} order by created_at desc offset 60
+    `;
+    for (const row of extra) {
+      await sql`delete from media_assets where id = ${row.id} and user_id = ${userId}`;
+    }
+  } catch (e) {
+    const { deskLog } = await import("./log");
+    await deskLog({
+      level: "warn",
+      scope: "media.asset",
+      userId,
+      message: e instanceof Error ? e.message : String(e),
+    });
+  }
+  return id;
+}
+
+export async function imaginePhoto(userId: string, prompt: string, provider?: string, pageId?: string) {
   const settings = await getSettings(userId);
   const chosen = (provider || settings.defaultImageProvider || "grok") as ImageProviderId;
   const key = await providerKey(userId, chosen);
-  return generateImageWithProvider({ provider: chosen, prompt, apiKey: key });
+  const result = await generateImageWithProvider({ provider: chosen, prompt, apiKey: key });
+  if ("dataUrl" in result) {
+    const assetId = await persistMediaAsset(userId, {
+      pageId,
+      fileName: result.fileName,
+      dataUrl: result.dataUrl,
+      prompt,
+      provider: chosen,
+      altText: prompt.slice(0, 200),
+    });
+    const { deskLog } = await import("./log");
+    await deskLog({
+      level: "info",
+      scope: "imagine",
+      userId,
+      message: `${chosen} still saved${assetId ? ` (${assetId.slice(0, 8)})` : ""}`,
+    });
+    return { ...result, assetId, provider: chosen };
+  }
+  return { ...result, provider: chosen };
+}
+
+export async function probeTextProvider(userId: string, providerHint?: string) {
+  const settings = await getSettings(userId);
+  const provider = (providerHint || settings.defaultTextProvider || "grok") as TextProviderId;
+  const key = await providerKey(userId, provider);
+  try {
+    const text = await chatWithProvider({
+      provider,
+      apiKey: key,
+      maxTokens: 16,
+      system: "Reply with the single word pong.",
+      user: "ping",
+    });
+    const ok = /pong/i.test(text) || text.trim().length > 0;
+    return { ok, provider, detail: ok ? `${provider} answered.` : "Empty reply." };
+  } catch (e) {
+    return { ok: false, provider, detail: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+export async function probeImageProvider(userId: string, providerHint?: string) {
+  const settings = await getSettings(userId);
+  const provider = (providerHint || settings.defaultImageProvider || "grok") as ImageProviderId;
+  const result = await imaginePhoto(userId, "solid navy square, no text, no logos, no people", provider);
+  if ("error" in result) return { ok: false, provider, detail: result.error };
+  return { ok: true, provider, detail: `Got ${result.fileName}.` };
 }
 
 async function needsYouSafe(userId: string): Promise<NeedsItem[]> {
   try {
     return await needsYou(userId);
-  } catch {
+  } catch (e) {
+    const { deskLog } = await import("./log");
+    await deskLog({
+      level: "warn",
+      scope: "needs",
+      userId,
+      message: e instanceof Error ? e.message : String(e),
+    });
     return [];
   }
 }
@@ -1089,10 +1697,22 @@ export const pairDevice = redeemPairingCode;
 
 export async function runAgent(
   userId: string,
-  data: { pageId: string; prompt: string; provider?: string; mapPage?: boolean },
+  data: { pageId: string; prompt: string; provider?: string; mapPage?: boolean; persona?: string },
 ) {
   const { runDeskAgent } = await import("./agent");
-  return runDeskAgent(userId, data);
+  try {
+    return await runDeskAgent(userId, data);
+  } catch (e) {
+    const { deskLog } = await import("./log");
+    await deskLog({
+      level: "error",
+      scope: "agent.run",
+      userId,
+      message: e instanceof Error ? e.message : String(e),
+      extra: { pageId: data.pageId, persona: data.persona },
+    });
+    throw e;
+  }
 }
 
 export async function pageResearchProfile(userId: string, pageId: string) {
@@ -1136,6 +1756,8 @@ export async function listAgentRuns(userId: string, pageId?: string) {
 export async function buildPageMetrics(userId: string): Promise<Record<string, PageMetrics>> {
   const sql = await getSql();
   const pageMetrics: Record<string, PageMetrics> = {};
+  const allPageIds = await sql<{ id: string }>`select id from pages where user_id = ${userId} and is_active = true`;
+  for (const row of allPageIds) pageMetrics[row.id] = emptyPageMetrics();
   const mixByPage = await sql<{ page_id: string; media_type: string; n: number }>`
     select page_id, media_type, count(*)::int as n from posts
     where user_id = ${userId} and status = 'Published'
@@ -1185,14 +1807,67 @@ export async function buildPageMetrics(userId: string): Promise<Record<string, P
     group by page_id
   `;
   for (const row of cadenceByPage) (pageMetrics[row.page_id] ??= emptyPageMetrics()).postedLast24h = Number(row.n ?? 0);
-  for (const key of Object.keys(pageMetrics)) {
-    const m = pageMetrics[key];
+  const dueByPage = await sql<{ page_id: string; n: number }>`
+    select page_id, count(*)::int as n from posts
+    where user_id = ${userId}
+      and status in ('LocalScheduled', 'FacebookScheduled')
+    group by page_id
+  `;
+  for (const row of dueByPage) (pageMetrics[row.page_id] ??= emptyPageMetrics()).dueCount = Number(row.n ?? 0);
+  const lastPub = await sql<{ page_id: string; last_pub: string | null }>`
+    select page_id, max(published_time)::text as last_pub from posts
+    where user_id = ${userId} and status = 'Published'
+    group by page_id
+  `;
+  for (const row of lastPub) (pageMetrics[row.page_id] ??= emptyPageMetrics()).lastPublishedAt = row.last_pub;
+  const nextSched = await sql<{ page_id: string; next_at: string | null }>`
+    select page_id, min(scheduled_publish_time)::text as next_at from posts
+    where user_id = ${userId}
+      and status in ('LocalScheduled', 'FacebookScheduled')
+      and scheduled_publish_time is not null
+      and scheduled_publish_time > now()
+    group by page_id
+  `;
+  for (const row of nextSched) (pageMetrics[row.page_id] ??= emptyPageMetrics()).nextScheduledAt = row.next_at;
+
+  const captions = await sql<{ page_id: string; message: string }>`
+    select page_id, message from posts
+    where user_id = ${userId} and message is not null and message <> ''
+      and status in ('Published', 'FacebookScheduled', 'LocalScheduled', 'LocalDraft')
+    order by created_at desc
+  `;
+  const byPage = new Map<string, string[]>();
+  for (const row of captions) {
+    const list = byPage.get(row.page_id) ?? [];
+    if (list.length < 8) list.push(row.message);
+    byPage.set(row.page_id, list);
+  }
+  const { uniquenessScore } = await import("./fleet");
+  const { jaccard, tokenize } = await import("./policy");
+  const pageIds = new Set([...Object.keys(pageMetrics), ...byPage.keys()]);
+  for (const id of pageIds) {
+    const m = (pageMetrics[id] ??= emptyPageMetrics());
+    const mine = byPage.get(id) ?? [];
+    const others: string[] = [];
+    for (const [pid, msgs] of byPage) if (pid !== id) others.push(...msgs);
+    m.uniqueness = uniquenessScore(mine, others, jaccard, tokenize);
     m.mixDiversity = Object.values(m.mix).filter((n) => n > 0).length;
   }
   return pageMetrics;
 }
 
 function emptyPageMetrics(): PageMetrics {
-  return { mix: { Text: 0, Photo: 0, Carousel: 0, Video: 0, Reel: 0, Story: 0 }, mixDiversity: 0, failedCount: 0, merchCount: 0, inboxCount: 0, postedLast24h: 0 };
+  return {
+    mix: { Text: 0, Photo: 0, Carousel: 0, Video: 0, Reel: 0, Story: 0 },
+    mixDiversity: 0,
+    failedCount: 0,
+    merchCount: 0,
+    inboxCount: 0,
+    postedLast24h: 0,
+    dueCount: 0,
+    uniqueness: 100,
+    lastPublishedAt: null,
+    nextScheduledAt: null,
+  };
 }
 

@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { getSql } from "@/lib/db";
 import { decryptSecret, encryptSecret } from "./crypto";
-import { cadenceLevel } from "./policy";
+import { cadenceLevel, REEL_API_CAP_24H, REEL_API_WARN_24H, reelCapLevel } from "./policy";
 import type {
   CadenceResult,
   CommentRow,
@@ -64,6 +64,8 @@ export async function loadSettings(userId: string, origin: string): Promise<Sett
     facebookLastError,
     facebookLastRedirect,
     facebookLastOk,
+    hidePractice,
+    timezone,
   ] = await Promise.all([
     getSetting(userId, "facebook_app_id"),
     getSetting(userId, "facebook_app_secret"),
@@ -81,6 +83,8 @@ export async function loadSettings(userId: string, origin: string): Promise<Sett
     getSetting(userId, "facebook_last_error"),
     getSetting(userId, "facebook_last_redirect"),
     getSetting(userId, "facebook_last_connect_ok"),
+    getSetting(userId, "hide_practice"),
+    getSetting(userId, "timezone"),
   ]);
   const grok = Boolean(process.env.XAI_API_KEY);
   const live = await sql<{ n: number }>`
@@ -110,6 +114,8 @@ export async function loadSettings(userId: string, origin: string): Promise<Sett
     facebookLastRedirect: facebookLastRedirect,
     facebookConnected: facebookLastOk === "1" || Number(live[0]?.n ?? 0) > 0,
     livePageCount: Number(live[0]?.n ?? 0),
+    hidePractice: hidePractice !== "0",
+    timezone: timezone || null,
   };
 }
 
@@ -135,6 +141,8 @@ function mapPage(r: Record<string, unknown>): PageRow {
     cadence_warn_per_24h: Number(r.cadence_warn_per_24h ?? 8),
     cadence_block_per_24h: Number(r.cadence_block_per_24h ?? 20),
     rss_feed_url: r.rss_feed_url == null ? null : String(r.rss_feed_url),
+    picture_url: r.picture_url == null ? null : String(r.picture_url),
+    posting_slots_json: r.posting_slots_json == null ? null : String(r.posting_slots_json),
     created_at: String(r.created_at),
     updated_at: String(r.updated_at),
     has_token: asBool(r.has_token),
@@ -172,12 +180,25 @@ function mapPost(r: Record<string, unknown>): PostRow {
 
 export async function listPages(userId: string): Promise<PageRow[]> {
   const sql = await getSql();
-  const rows = await sql<Record<string, unknown>>`
-    select p.*, (p.access_token_enc is not null) as has_token
-    from pages p
-    where p.user_id = ${userId} and p.is_active = true
-    order by p.name
+  const hide = await getSetting(userId, "hide_practice");
+  const live = await sql<{ n: number }>`
+    select count(*)::int as n from pages
+    where user_id = ${userId} and is_active = true and is_practice = false
   `;
+  const hidePractice = hide !== "0" && Number(live[0]?.n ?? 0) > 0;
+  const rows = hidePractice
+    ? await sql<Record<string, unknown>>`
+        select p.*, (p.access_token_enc is not null) as has_token
+        from pages p
+        where p.user_id = ${userId} and p.is_active = true and p.is_practice = false
+        order by p.name
+      `
+    : await sql<Record<string, unknown>>`
+        select p.*, (p.access_token_enc is not null) as has_token
+        from pages p
+        where p.user_id = ${userId} and p.is_active = true
+        order by p.name
+      `;
   return rows.map(mapPage);
 }
 
@@ -298,7 +319,39 @@ export async function cadenceForPage(userId: string, pageId: string): Promise<Ca
   `;
   const postedLast24h = Number(counts[0]?.n ?? 0);
   const level = cadenceLevel(postedLast24h, warnAt, blockAt);
-  return { postedLast24h, warnAt, blockAt, level };
+  const reels = await sql<{ n: number }>`
+    select count(*)::int as n from posts
+    where user_id = ${userId} and page_id = ${pageId}
+      and media_type = 'Reel'
+      and (
+        (
+          status = 'Published'
+          and coalesce(published_time, created_at) > now() - interval '24 hours'
+          and coalesce(published_time, created_at) <= now()
+        )
+        or (
+          status = 'Publishing'
+          and updated_at > now() - interval '24 hours'
+        )
+        or (
+          status in ('FacebookScheduled', 'LocalScheduled')
+          and scheduled_publish_time is not null
+          and scheduled_publish_time > now() - interval '24 hours'
+          and scheduled_publish_time <= now() + interval '24 hours'
+        )
+      )
+  `;
+  const reelLast24h = Number(reels[0]?.n ?? 0);
+  return {
+    postedLast24h,
+    warnAt,
+    blockAt,
+    level,
+    reelLast24h,
+    reelWarnAt: REEL_API_WARN_24H,
+    reelBlockAt: REEL_API_CAP_24H,
+    reelLevel: reelCapLevel(reelLast24h),
+  };
 }
 
 export async function listComments(
@@ -517,10 +570,12 @@ export async function searchAll(userId: string, q: string) {
     where user_id = ${userId} and message ilike ${like}
     order by created_at desc limit 10
   `;
-  const comments = await sql<{ id: string; message: string; author_name: string | null }>`
-    select id, message, author_name from comments
-    where user_id = ${userId} and message ilike ${like}
-    order by created_at desc limit 8
+  const comments = await sql<{ id: string; message: string; author_name: string | null; page_id: string | null }>`
+    select c.id, c.message, c.author_name, po.page_id
+    from comments c
+    left join posts po on po.id = c.post_id
+    where c.user_id = ${userId} and c.message ilike ${like}
+    order by c.created_at desc limit 8
   `;
   return { pages, posts, comments };
 }

@@ -1,5 +1,7 @@
 # PosterPal — Industry-Standards Audit & Modernization Roadmap
 
+> **Stale on deploy/security rows.** Re-verified 2026-09-01: Docker, Compose, CI, `.env.example`, backup, `/api/health`, login wall, bulk CSV, RSS drafts, and recycle **exist**. Use [`README.md`](README.md) + [`ARCHITECTURE.md`](ARCHITECTURE.md) for current status. This file remains useful as the original gap analysis.
+
 **Date:** 2026-08-28
 **Method:** Live codebase verification (19,065 LOC across `src/` + `scripts/`) + Meta Graph API v26 permission model + competitor research (Buffer, Hootsuite, Publer, Postiz, Mixpost) + OWASP 2025 / Secrets Management Cheat Sheet.
 **Principle:** Every number below was checked against the running repo, not estimated. Claims that could not be verified are labeled as such.

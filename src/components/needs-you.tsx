@@ -3,7 +3,8 @@ import { toast } from "sonner";
 import { publishNowFn } from "@/lib/posterpal/fns";
 import type { NeedsItem } from "@/lib/posterpal/types";
 import { publishToast } from "@/lib/posterpal/operator";
-import { useShellStore } from "@/lib/store";
+import { personaForNeed } from "@/lib/posterpal/agent-skills";
+import { useAgentBriefStore, useShellStore } from "@/lib/store";
 import { Button } from "./ui/button";
 
 export function NeedsYou({
@@ -15,6 +16,7 @@ export function NeedsYou({
 }) {
   const navigate = useNavigate();
   const setPrefill = useShellStore((s) => s.setComposerPrefill);
+  const queueBrief = useAgentBriefStore((s) => s.queue);
 
   if (!items.length) {
     return (
@@ -32,7 +34,7 @@ export function NeedsYou({
         <span className="text-[12px] text-muted-foreground tabular-nums">{items.length}</span>
       </div>
       <p className="mt-1 text-[13px] text-muted-foreground">
-        The desk drafts and queues. You click Publish and Send. Local scheduler only fires while this desk is open.
+        The desk drafts and queues. You click Publish and Send. The in-tab ticker runs every 60s; the background worker fires due posts when the browser is closed.
       </p>
       <ul className="mt-3 space-y-2">
         {items.slice(0, 8).map((item) => (
@@ -78,12 +80,34 @@ export function NeedsYou({
                     variant="outline"
                     onClick={() => {
                       if (item.href === "/composer") setPrefill({ message: "" });
+                      if (item.kind === "failed") {
+                        void navigate({ to: "/drafts", search: { tab: "failed" } });
+                        return;
+                      }
+                      if (item.kind === "overdue") {
+                        void navigate({ to: "/drafts", search: { tab: "queued" } });
+                        return;
+                      }
                       void navigate({ to: item.href });
                     }}
                   >
                     Open
                   </Button>
                 )}
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    if (item.pageId) useShellStore.getState().setSelectedPageId(item.pageId);
+                    queueBrief(
+                      `Help with: ${item.title}. ${item.detail} ${item.pageName ? `Page: ${item.pageName}.` : ""} Use DESK OPS. Draft what I should do next. Do not publish or send replies.`,
+                      personaForNeed(item.kind),
+                    );
+                    void navigate({ to: "/agent" });
+                  }}
+                >
+                  Ask agent
+                </Button>
               </div>
             </div>
           </li>

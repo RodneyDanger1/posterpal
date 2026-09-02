@@ -48,11 +48,13 @@ function Analytics() {
   const series = useMemo(() => {
     const rows = pack?.rows ?? [];
     return rows.map((r) => ({
+      id: String(r.id),
       t: format(new Date(String(r.published_time ?? r.created_at)), "MMM d"),
       reactions: Number(r.reactions_count ?? 0),
       comments: Number(r.comments_count ?? 0),
       views: Number(r.media_view_unique ?? 0),
       variant: String(r.ai_variant_label ?? ""),
+      groupId: String(r.variant_group_id ?? ""),
       message: String(r.message ?? ""),
     }));
   }, [pack]);
@@ -66,17 +68,41 @@ function Analytics() {
     { reactions: 0, comments: 0, views: 0 },
   );
 
-  const winners = useMemo(() => {
-    const groups = new Map<string, { label: string; n: number; reactions: number }>();
+  const experiments = useMemo(() => {
+    const byGroup = new Map<
+      string,
+      Map<string, { label: string; n: number; reactions: number; bestCaption: string; bestId: string; bestScore: number }>
+    >();
     for (const r of series) {
-      const label = String(r.variant ?? "").trim();
-      if (!label) continue;
-      const g = groups.get(label) ?? { label, n: 0, reactions: 0 };
-      g.n += 1;
-      g.reactions += r.reactions;
-      groups.set(label, g);
+      const gid = r.groupId.trim();
+      const label = r.variant.trim();
+      if (!gid || !label) continue;
+      const inner = byGroup.get(gid) ?? new Map();
+      const score = r.reactions + r.comments;
+      const cur = inner.get(label) ?? {
+        label,
+        n: 0,
+        reactions: 0,
+        bestCaption: r.message,
+        bestId: r.id,
+        bestScore: score,
+      };
+      cur.n += 1;
+      cur.reactions += r.reactions;
+      if (score > cur.bestScore) {
+        cur.bestScore = score;
+        cur.bestCaption = r.message;
+        cur.bestId = r.id;
+      }
+      inner.set(label, cur);
+      byGroup.set(gid, inner);
     }
-    return [...groups.values()].sort((a, b) => b.reactions / Math.max(1, b.n) - a.reactions / Math.max(1, a.n));
+    return [...byGroup.entries()].map(([groupId, inner]) => {
+      const variants = [...inner.values()].sort(
+        (a, b) => b.reactions / Math.max(1, b.n) - a.reactions / Math.max(1, a.n),
+      );
+      return { groupId, variants, leader: variants[0] ?? null };
+    });
   }, [series]);
 
   const bestCaption = useMemo(() => {
@@ -92,7 +118,8 @@ function Analytics() {
     <div className="space-y-4">
       <PageHeader
         title="Analytics"
-        hint="Post-level reactions, comments, and media views from Graph sync. The heatmap is this Page's own hours — not a generic blog tip. Insights metrics need 100+ likes. A/B winners compare AI variant labels."
+        line="Heatmap and A/B are this Page only. Unique-reach Insights were deprecated June 2026 — we show media views."
+        hint="Post-level reactions, comments, and media views from Graph sync (post_total_media_view / post_media_view — unique-reach metrics were deprecated June 2026). Heatmap is this Page's own hours. Insights need 100+ likes."
       >
         {[7, 28, 90].map((d) => (
           <Button key={d} size="sm" variant={days === d ? "default" : "outline"} title={`${d}-day window`} onClick={() => setDays(d)}>
@@ -270,11 +297,11 @@ function Analytics() {
           ) : (
           <ResponsiveContainer width="100%" height="100%">
             <LineChart data={series}>
-              <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
-              <XAxis dataKey="t" tick={{ fontSize: 11 }} />
-              <YAxis tick={{ fontSize: 11 }} />
+              <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" strokeOpacity={0.4} />
+              <XAxis dataKey="t" tick={{ fontSize: 11, fill: "var(--color-muted-foreground)" }} />
+              <YAxis tick={{ fontSize: 11, fill: "var(--color-muted-foreground)" }} />
               <Tooltip content={<ChartTip />} />
-              <Line type="monotone" dataKey="views" name="Views" stroke="var(--color-primary)" strokeWidth={2} dot={false} />
+              <Line type="monotone" dataKey="views" name="Media views" stroke="var(--color-primary)" strokeWidth={2} dot={false} />
               <Line type="monotone" dataKey="reactions" name="Reactions" stroke="var(--color-success)" strokeWidth={2} dot={false} />
             </LineChart>
           </ResponsiveContainer>
@@ -292,9 +319,9 @@ function Analytics() {
           ) : (
           <ResponsiveContainer width="100%" height="100%">
             <BarChart data={series}>
-              <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
-              <XAxis dataKey="t" tick={{ fontSize: 11 }} />
-              <YAxis tick={{ fontSize: 11 }} />
+              <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" strokeOpacity={0.4} />
+              <XAxis dataKey="t" tick={{ fontSize: 11, fill: "var(--color-muted-foreground)" }} />
+              <YAxis tick={{ fontSize: 11, fill: "var(--color-muted-foreground)" }} />
               <Tooltip content={<ChartTip />} />
               <Bar dataKey="comments" name="Comments" fill="var(--color-primary)" radius={4} />
             </BarChart>
@@ -303,22 +330,50 @@ function Analytics() {
         </CardContent>
       </Card>
 
-      {winners.length > 0 ? (
+      {experiments.length > 0 ? (
         <Card>
           <CardHeader>
             <CardTitle>A/B variant winner</CardTitle>
           </CardHeader>
-          <CardContent>
-            <p className="text-sm">
-              Leading variant: <strong>{winners[0]?.label?.trim() ? winners[0].label : "Unlabeled variant"}</strong> ({Math.round((winners[0]?.reactions ?? 0) / Math.max(1, winners[0]?.n ?? 1))} avg reactions).
+          <CardContent className="space-y-4">
+            <p className="text-[13px] text-muted-foreground">
+              Grouped by the pair you launched together. PosterPal never auto-picks a winner — you reuse the leading caption.
             </p>
-            <ul className="mt-2 space-y-1 text-sm text-muted-foreground">
-              {winners.map((w) => (
-                <li key={w.label}>
-                  {w.label}: {w.n} posts, {w.reactions} reactions
-                </li>
-              ))}
-            </ul>
+            {experiments.map((ex) => (
+              <div key={ex.groupId} className="rounded-lg bg-muted/40 px-3 py-2">
+                <p className="text-sm">
+                  Leading: <strong>{ex.leader?.label ?? "—"}</strong>
+                  {ex.leader
+                    ? ` · ${Math.round(ex.leader.reactions / Math.max(1, ex.leader.n))} avg reactions`
+                    : null}
+                </p>
+                <ul className="mt-1 space-y-0.5 text-[13px] text-muted-foreground">
+                  {ex.variants.map((w) => (
+                    <li key={w.label}>
+                      {w.label}: {w.n} post{w.n === 1 ? "" : "s"}, {w.reactions} reactions
+                    </li>
+                  ))}
+                </ul>
+                {ex.leader?.bestCaption ? (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="mt-2 min-h-11"
+                    onClick={() => {
+                      setPrefill({
+                        message: ex.leader!.bestCaption,
+                        pageId,
+                        mediaType: "Text",
+                        when: best ? nextDatetimeLocal(best.day, best.hour) : suggestedIndustrySlot(),
+                      });
+                      void navigate({ to: "/composer" });
+                    }}
+                  >
+                    Reuse leading caption
+                  </Button>
+                ) : null}
+              </div>
+            ))}
           </CardContent>
         </Card>
       ) : null}

@@ -2,6 +2,7 @@ import { createRootRoute, HeadContent, Outlet, Scripts } from "@tanstack/react-r
 import { AuthProvider } from "@/lib/auth/provider";
 import { PreviewHostBridge } from "@/components/preview-host-bridge";
 import { ServiceWorkerManager } from "@/components/service-worker-manager";
+import { ClientLogCatcher } from "@/components/client-log-catcher";
 import { AppErrorComponent } from "@/lib/error-component";
 import { Toaster } from "sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -55,6 +56,7 @@ function RootDocument() {
       <body>
         <PreviewHostBridge />
         <ServiceWorkerManager />
+        <ClientLogCatcher />
         <AuthProvider>
           <TooltipProvider delayDuration={280} skipDelayDuration={120}>
             <Outlet />

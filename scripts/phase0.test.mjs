@@ -3,12 +3,14 @@ import { test } from "node:test";
 import {
   buildFeedPublishPayload,
   facebookScheduleWindow,
+  graphOperatorMessage,
   mapGraphError,
+  retryDelayMs,
 } from "../src/lib/posterpal/graph.ts";
 import { monetizationFitness } from "../src/lib/posterpal/operator.ts";
 import { carouselPartialWarning } from "../src/lib/posterpal/carousel.ts";
 import { facebookAppNameIssues } from "../src/lib/posterpal/facebook-names.ts";
-import { parseCsv } from "../src/lib/posterpal/csv.ts";
+import { mapBulkCsvRows, parseCsv } from "../src/lib/posterpal/csv.ts";
 import { parseRssItems } from "../src/lib/posterpal/rss.ts";
 
 // Regression tests for Surpass.md §8 (audit 2026-08-21) — the publish/reliability paths.
@@ -31,11 +33,39 @@ test("mapGraphError: code 1 with scheduling in the message is unknown_schedule",
 });
 
 test("mapGraphError: rate-limit codes are retryable", () => {
-  for (const code of [4, 17, 32, 613, 80001]) {
+  for (const code of [4, 17, 32, 613, 80001, 80004, 341]) {
     const m = mapGraphError({ httpStatus: 400, code });
     assert.equal(m.kind, "rate_limit", `code ${code}`);
     assert.equal(m.retryable, true, `code ${code}`);
+    assert.ok(m.operatorHint.length > 10);
   }
+});
+
+test("mapGraphError: 506 duplicate and 1609005 link scrape are not retried", () => {
+  const dup = mapGraphError({ httpStatus: 400, code: 506, message: "Duplicate status message" });
+  assert.equal(dup.kind, "duplicate");
+  assert.equal(dup.retryable, false);
+  assert.match(dup.operatorHint, /Rewrite/);
+  const link = mapGraphError({ httpStatus: 400, code: 1609005 });
+  assert.equal(link.retryable, false);
+  assert.match(link.operatorHint, /shop URL/);
+});
+
+test("mapGraphError: permission and token hints tell the operator what to click", () => {
+  const perm = mapGraphError({ httpStatus: 403, code: 10 });
+  assert.equal(perm.kind, "permission");
+  assert.match(perm.operatorHint, /Connect/);
+  const proof = mapGraphError({ httpStatus: 400, code: 104 });
+  assert.match(proof.operatorHint, /App Secret/);
+  const msg = graphOperatorMessage(mapGraphError({ httpStatus: 400, code: 190, fbtraceId: "abc" }));
+  assert.match(msg, /Reconnect Facebook/);
+  assert.match(msg, /fbtrace abc/);
+});
+
+test("retryDelayMs stays bounded and uses header regain as a small bump", () => {
+  const d = retryDelayMs(0, { sourceHeader: "X-App-Usage", callCountPct: 100, estimatedRegainMinutes: 5 });
+  assert.ok(d >= 400);
+  assert.ok(d <= 20_000);
 });
 
 test("mapGraphError: 5xx is a retryable server error", () => {
@@ -58,6 +88,13 @@ test("facebookScheduleWindow: sooner than 10 minutes stays local", () => {
 test("facebookScheduleWindow: beyond 30 days stays local", () => {
   const now = new Date("2026-08-21T12:00:00Z");
   assert.match(facebookScheduleWindow(new Date("2026-09-25T12:00:00Z"), now) ?? "", /30 days/);
+});
+
+test("facebookScheduleWindow: Reels cap at 29 days", () => {
+  const now = new Date("2026-08-21T12:00:00Z");
+  assert.equal(facebookScheduleWindow(new Date("2026-09-19T12:00:00Z"), now, "Reel"), null);
+  assert.match(facebookScheduleWindow(new Date("2026-09-20T12:01:00Z"), now, "Reel") ?? "", /29 days/);
+  assert.equal(facebookScheduleWindow(new Date("2026-09-20T12:00:00Z"), now, "Photo"), null);
 });
 
 test("buildFeedPublishPayload: publish-now sends published=true and no schedule", () => {
@@ -154,6 +191,77 @@ test("parseCsv: quoted commas, escaped quotes, CRLF, and blank-line skipping", (
   assert.equal(rows[1][0], "Staff pick, a novel on a train");
   assert.equal(rows[2][0], 'Say "hi" to the neighbors');
   assert.deepEqual(rows[3], ["Plain row without quotes"]);
+});
+
+test("mapBulkCsvRows respects named headers in any order", () => {
+  const mapped = mapBulkCsvRows(
+    parseCsv("page,caption,when\nNorth Shore Books,Story hour,2026-09-01 16:00"),
+  );
+  assert.equal(mapped.length, 1);
+  assert.equal(mapped[0].message, "Story hour");
+  assert.equal(mapped[0].pageId, "North Shore Books");
+  assert.equal(mapped[0].when, "2026-09-01 16:00");
+});
+
+test("facebook docs fetcher only allows official developer hosts", async () => {
+  const { isAllowedDocsUrl, stripHtmlToText, fetchOfficialGuide } = await import(
+    "../src/lib/posterpal/facebook-docs.ts"
+  );
+  assert.equal(isAllowedDocsUrl("https://developers.facebook.com/docs/development/create-an-app"), true);
+  assert.equal(isAllowedDocsUrl("https://developers.meta.com/docs/"), true);
+  assert.equal(isAllowedDocsUrl("https://www.facebook.com/pages/creation/"), false);
+  assert.equal(isAllowedDocsUrl("https://m.facebook.com/"), false);
+  assert.equal(isAllowedDocsUrl("http://developers.facebook.com/docs"), false);
+  const text = stripHtmlToText(
+    "<html><head><title>Create an App</title></head><body><script>evil()</script><article><p>Use Development Mode.</p></article></body></html>",
+  );
+  assert.match(text, /Create an App/);
+  assert.match(text, /Development Mode/);
+  assert.doesNotMatch(text, /evil/);
+  const blocked = await fetchOfficialGuide("https://www.facebook.com/");
+  assert.equal(blocked.error, "url_not_allowed");
+});
+
+test("cross-page duplicate: identical captions across Pages are a block", async () => {
+  const { runPolicyChecklist } = await import("../src/lib/posterpal/policy.ts");
+  const r = runPolicyChecklist({
+    message: "Saturday story hour is back at 10:30 on the river rug with cider.",
+    hasImages: false,
+    missingAlt: false,
+    createdWithAi: false,
+    recentMessages: [],
+    otherPageMessages: [
+      {
+        id: "x",
+        pageName: "Winona Weekend",
+        message: "Saturday story hour is back at 10:30 on the river rug with cider.",
+      },
+    ],
+  });
+  assert.equal(r.canPublish, false);
+  assert.ok(r.flags.some((f) => f.id === "cross-page-duplicate"));
+});
+
+test("uniquenessScore: identical fleet captions score 0; distinct score 100", async () => {
+  const { uniquenessScore } = await import("../src/lib/posterpal/fleet.ts");
+  const { jaccard, tokenize } = await import("../src/lib/posterpal/policy.ts");
+  const { PRACTICE_FLEET, FLEET_SIZE } = await import("../src/lib/posterpal/fleet.ts");
+  assert.equal(FLEET_SIZE, 10);
+  assert.equal(new Set(PRACTICE_FLEET.map((p) => p.name)).size, 10);
+  const zero = uniquenessScore(
+    ["Saturday story hour is back at the river rug"],
+    ["Saturday story hour is back at the river rug"],
+    jaccard,
+    tokenize,
+  );
+  assert.equal(zero, 0);
+  const full = uniquenessScore(
+    ["Thursday kit: pork, squash, cider pan sauce. Pickup 4–6."],
+    ["Open-studio Saturday 10–2. River glaze just came out of the kiln."],
+    jaccard,
+    tokenize,
+  );
+  assert.ok(full >= 70, `expected high uniqueness, got ${full}`);
 });
 
 test("parseRssItems: titles, CDATA, HTML stripping, and atom links", () => {

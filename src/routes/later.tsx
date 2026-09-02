@@ -9,7 +9,7 @@ import { Hint } from "@/components/ui/tooltip";
 import { deleteIdeaFn, ideasFn, moveIdeaFn, saveIdeaFn } from "@/lib/posterpal/fns";
 import { LATER_COLUMNS, laterColumnOf, type LaterColumnId } from "@/lib/posterpal/operator";
 import type { IdeaRow } from "@/lib/posterpal/types";
-import { useShellStore } from "@/lib/store";
+import { useAgentBriefStore, useShellStore } from "@/lib/store";
 import { relativeTime, copyText } from "@/lib/utils";
 
 export const Route = createFileRoute("/later")({
@@ -28,11 +28,23 @@ function Later() {
   const [rows, setRows] = useState<IdeaRow[]>([]);
   const [draft, setDraft] = useState("");
   const [column, setColumn] = useState<LaterColumnId>("inbox");
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [thisPageOnly, setThisPageOnly] = useState(false);
 
   const load = () => {
+    setLoadError(null);
     void ideasFn({ data: {} })
-      .then(setRows)
-      .catch((e: unknown) => toast.error(e instanceof Error ? e.message : "Could not load Later"));
+      .then((list) => {
+        setRows(list);
+        setLoading(false);
+      })
+      .catch((e: unknown) => {
+        const msg = e instanceof Error ? e.message : "Could not load Later";
+        setLoadError(msg);
+        setLoading(false);
+        toast.error(msg);
+      });
   };
   useEffect(load, []);
 
@@ -43,9 +55,10 @@ function Later() {
       "caption-ready": [],
       "offer-this-week": [],
     };
-    for (const idea of rows) g[laterColumnOf(idea.notes)].push(idea);
+    const visible = thisPageOnly && pageId ? rows.filter((i) => i.page_id === pageId) : rows;
+    for (const idea of visible) g[laterColumnOf(idea.notes)].push(idea);
     return g;
-  }, [rows]);
+  }, [rows, thisPageOnly, pageId]);
 
   return (
     <div className="space-y-4">
@@ -60,7 +73,12 @@ function Later() {
           e.preventDefault();
           if (!draft.trim()) return;
           void saveIdeaFn({
-            data: { pageId: pageId ?? null, body: draft, mediaType: "Text", notes: column === "inbox" ? null : column },
+            data: {
+              pageId: pageId ?? null,
+              body: draft,
+              mediaType: column === "photo-needed" ? "Photo" : "Text",
+              notes: column === "inbox" ? null : column,
+            },
           })
             .then(() => {
               setDraft("");
@@ -82,6 +100,15 @@ function Later() {
           className="mt-2 w-full rounded-lg border border-input bg-background px-3 py-2 text-sm"
         />
         <div className="mt-3 flex flex-wrap items-center gap-2">
+          <Button
+            type="button"
+            size="sm"
+            variant={thisPageOnly ? "default" : "outline"}
+            onClick={() => setThisPageOnly((v) => !v)}
+            title="Show ideas tagged to the selected Page only"
+          >
+            {thisPageOnly ? "This Page" : "All Pages"}
+          </Button>
           {LATER_COLUMNS.map((c) => (
             <Hint key={c.id} label={c.hint}>
               <Button type="button" size="sm" variant={column === c.id ? "default" : "outline"} onClick={() => setColumn(c.id)}>
@@ -98,7 +125,16 @@ function Later() {
         </div>
       </form>
 
-      {rows.length === 0 ? (
+      {loading ? (
+        <p className="text-sm text-muted-foreground">Loading Later…</p>
+      ) : loadError ? (
+        <div className="rounded-xl bg-card p-4 shadow-card">
+          <p className="text-sm text-destructive">{loadError}</p>
+          <Button className="mt-2" size="sm" variant="outline" onClick={load}>
+            Retry
+          </Button>
+        </div>
+      ) : rows.length === 0 ? (
         <p className="text-sm text-muted-foreground">Nothing parked yet. Save from here or from Composer.</p>
       ) : (
         <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
@@ -117,7 +153,9 @@ function Later() {
                       {idea.page_name ?? "Any Page"} · {idea.media_type} · {relativeTime(idea.created_at)}
                     </div>
                     <h3 className="mt-1 text-sm font-semibold">{idea.title}</h3>
-                    <p className="mt-1 line-clamp-5 whitespace-pre-wrap text-[13px]">{idea.body}</p>
+                    {idea.body.trim() !== idea.title.trim() ? (
+                      <p className="mt-1 line-clamp-5 whitespace-pre-wrap text-[13px]">{idea.body}</p>
+                    ) : null}
                     <div className="mt-2 flex flex-wrap gap-1">
                       <Hint label="Opens Composer with this text so you can attach media, run policy, and publish.">
                         <Button
@@ -155,7 +193,11 @@ function Later() {
                           const next = e.target.value as LaterColumnId;
                           void moveIdeaFn({
                             data: { id: idea.id, notes: next === "inbox" ? null : next },
-                          }).then(load);
+                          })
+                            .then(load)
+                            .catch((err: unknown) =>
+                              toast.error(err instanceof Error ? err.message : "Could not move idea"),
+                            );
                         }}
                         aria-label="Move idea"
                       >
@@ -165,8 +207,34 @@ function Later() {
                           </option>
                         ))}
                       </select>
+                      <Hint label="Queues a Memory brief. The Agent drafts; you still click Send.">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => {
+                            if (idea.page_id) setPage(idea.page_id);
+                            useAgentBriefStore.getState().queue(
+                              `Recall this parked Later idea and turn it into three captions in this Page's voice: “${idea.body.slice(0, 280)}”. Do not invent facts. Do not publish.`,
+                              "memory",
+                            );
+                            void navigate({ to: "/agent" });
+                          }}
+                        >
+                          Ask agent
+                        </Button>
+                      </Hint>
                       <Hint label="Removes this idea from Later. Does not affect Facebook.">
-                        <Button size="sm" variant="ghost" onClick={() => void deleteIdeaFn({ data: { id: idea.id } }).then(load)}>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() =>
+                            void deleteIdeaFn({ data: { id: idea.id } })
+                              .then(load)
+                              .catch((err: unknown) =>
+                                toast.error(err instanceof Error ? err.message : "Could not delete"),
+                              )
+                          }
+                        >
                           <Trash2 className="size-3.5" />
                         </Button>
                       </Hint>

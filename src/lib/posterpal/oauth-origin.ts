@@ -1,5 +1,21 @@
 /** Server-only: pick the origin Facebook will actually redirect to. */
 
+/** Facebook treats localhost and 127.0.0.1 as different redirect URIs. Always 127.0.0.1. */
+export function canonicalOrigin(origin: string): string {
+  try {
+    const u = new URL(origin.includes("://") ? origin : `http://${origin}`);
+    if (u.hostname === "localhost" || u.hostname === "::1") u.hostname = "127.0.0.1";
+    return u.origin;
+  } catch {
+    return origin.replace(/localhost/gi, "127.0.0.1");
+  }
+}
+
+export function desktopLoopbackCallback(): string {
+  const port = Number(process.env.PORT || process.env.NITRO_PORT || 8080) || 8080;
+  return `http://127.0.0.1:${port}/api/facebook/callback`;
+}
+
 export function publicOrigin(request: Request): string {
   const publicHost = process.env.VITE_PUBLIC_HOSTNAME?.trim();
   if (publicHost) return `https://${publicHost.replace(/^https?:\/\//, "").replace(/\/$/, "")}`;
@@ -8,9 +24,9 @@ export function publicOrigin(request: Request): string {
   if (forwardedHost) {
     const local = forwardedHost.includes("localhost") || forwardedHost.startsWith("127.");
     const proto = forwardedProto || (local ? "http" : "https");
-    return `${proto}://${forwardedHost}`;
+    return canonicalOrigin(`${proto}://${forwardedHost}`);
   }
-  return new URL(request.url).origin;
+  return canonicalOrigin(new URL(request.url).origin);
 }
 
 export function resolveOAuthRedirect(request: Request): string {
@@ -35,15 +51,22 @@ export function resolveOAuthRedirect(request: Request): string {
   if (ph) allowed.add(ph.replace(/^https?:\/\//, "").replace(/\/$/, ""));
   allowed.add("127.0.0.1:8080");
   allowed.add("localhost:8080");
-  if (!allowed.has(parsed.host)) {
+  const port = String(process.env.PORT || process.env.NITRO_PORT || 8080);
+  allowed.add(`127.0.0.1:${port}`);
+  allowed.add(`localhost:${port}`);
+  if (!allowed.has(parsed.host) && !allowed.has(parsed.host.replace("localhost", "127.0.0.1"))) {
     throw new Error(`Redirect host ${parsed.host} is not this desk. Use ${fallback}`);
   }
-  return `${parsed.origin}/api/facebook/callback`;
+  return `${canonicalOrigin(parsed.origin)}/api/facebook/callback`;
 }
 
-export function redirectCandidates(request: Request): string[] {
+export function redirectCandidates(request: Request, stored?: string | null): string[] {
   const set = new Set<string>();
+  if (stored) set.add(stored);
   set.add(`${publicOrigin(request)}/api/facebook/callback`);
-  set.add(`${new URL(request.url).origin}/api/facebook/callback`);
+  set.add(`${canonicalOrigin(new URL(request.url).origin)}/api/facebook/callback`);
+  set.add(desktopLoopbackCallback());
+  set.add("http://127.0.0.1:8080/api/facebook/callback");
+  set.add("http://localhost:8080/api/facebook/callback");
   return [...set];
 }

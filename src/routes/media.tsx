@@ -10,7 +10,7 @@ import { imaginePhotoFn, mediaLibraryFn, getSettingsFn } from "@/lib/posterpal/f
 import { inferMediaKind } from "@/lib/posterpal/operator";
 import { IMAGE_PROVIDERS } from "@/lib/posterpal/providers";
 import type { MediaLibraryItem, SettingsBag } from "@/lib/posterpal/types";
-import { useShellStore } from "@/lib/store";
+import { useAgentBriefStore, useShellStore } from "@/lib/store";
 
 export const Route = createFileRoute("/media")({ component: () => <Guard><Media /></Guard> });
 
@@ -23,6 +23,7 @@ function Media() {
   const [busy, setBusy] = useState(false);
   const [provider, setProvider] = useState("grok");
   const [settings, setSettings] = useState<SettingsBag | null>(null);
+  const [filter, setFilter] = useState("");
 
   useEffect(() => {
     void mediaLibraryFn({ data: { pageId } })
@@ -40,8 +41,22 @@ function Media() {
     <div className="space-y-4">
       <PageHeader
         title="Media library"
-        hint="Files attached to posts on this desk. Generate a still with Grok, Gemini Nano Banana, OpenAI Images, or Flux Schnell — then open Composer to caption and publish. AI images must be disclosed."
-      />
+        hint="Files attached to posts plus generated stills stored on this desk (they survive closing Composer and the phone). Generate with Grok, Gemini, OpenAI, or Flux — then caption in Composer. AI images must be disclosed."
+      >
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => {
+            useAgentBriefStore.getState().queue(
+              "Write a photoreal still prompt for this Page, then a matching caption. No text overlay, no logos. Do not publish.",
+              "research",
+            );
+            void navigate({ to: "/agent" });
+          }}
+        >
+          Ask agent
+        </Button>
+      </PageHeader>
       <div className="flex flex-wrap items-end gap-2 rounded-xl bg-card p-4 shadow-card">
         <div className="min-w-[220px] flex-1 space-y-1">
           <label className="text-[13px] font-medium" htmlFor="lib-imagine">Generate a photo</label>
@@ -77,12 +92,13 @@ function Media() {
                 return;
               }
               setBusy(true);
-              void imaginePhotoFn({ data: { prompt, provider } })
+              void imaginePhotoFn({ data: { prompt, provider, pageId } })
                 .then((r) => {
                   if ("error" in r) {
                     toast.error(r.error);
                     return;
                   }
+                  void mediaLibraryFn({ data: { pageId } }).then(setRows).catch(() => undefined);
                   setPrefill({
                     message: prompt,
                     pageId,
@@ -94,10 +110,11 @@ function Media() {
                         dataUrl: r.dataUrl,
                         altText: prompt.slice(0, 200),
                         createdWithAi: true,
+                        assetId: "assetId" in r ? String(r.assetId ?? "") : undefined,
                       },
                     ],
                   });
-                  toast.success("Image attached — opening Composer.");
+                  toast.success("Saved to the library and attached — opening Composer.");
                   void navigate({ to: "/composer" });
                 })
                 .catch((e: unknown) => toast.error(e instanceof Error ? e.message : "Imagine failed"))
@@ -113,8 +130,26 @@ function Media() {
           No files on the selected Page yet. Practice photos appear as tiles (no binary stored). Drop a file in Composer or generate one above.
         </p>
       ) : (
+        <>
+        <Input
+          value={filter}
+          onChange={(e) => setFilter(e.target.value)}
+          placeholder="Filter by file name or alt text"
+          className="h-11 max-w-sm"
+          aria-label="Filter media"
+        />
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
-          {rows.map((r) => (
+          {rows
+            .filter((r) => {
+              const q = filter.trim().toLowerCase();
+              if (!q) return true;
+              return (
+                String(r.file_name).toLowerCase().includes(q) ||
+                String(r.alt_text ?? "").toLowerCase().includes(q) ||
+                String(r.page_name ?? "").toLowerCase().includes(q)
+              );
+            })
+            .map((r) => (
             <figure key={String(r.id)} className="overflow-hidden rounded-xl bg-card shadow-card">
               {typeof r.data_url === "string" && (String(r.data_url).startsWith("data:image") || String(r.data_url).startsWith("http")) ? (
                 <img src={String(r.data_url)} alt={String(r.alt_text ?? r.file_name)} className="aspect-square w-full object-cover" />
@@ -156,6 +191,7 @@ function Media() {
             </figure>
           ))}
         </div>
+        </>
       )}
     </div>
   );

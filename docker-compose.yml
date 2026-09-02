@@ -52,7 +52,10 @@ services:
         condition: service_healthy
     environment:
       DATABASE_URL: postgres://posterpal:${POSTGRES_PASSWORD}@db:5432/posterpal
+      POSTERPAL_MASTER_KEY: ${POSTERPAL_MASTER_KEY:?set POSTERPAL_MASTER_KEY in .env}
+      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:-}
       POSTERPAL_WORKER_INTERVAL_MS: ${POSTERPAL_WORKER_INTERVAL_MS:-60000}
+      XAI_API_KEY: ${XAI_API_KEY:-}
     # The worker keeps the desk alive when no browser tab is open: fires due
     # LocalScheduled posts, syncs Graph, refreshes vault tokens.
 

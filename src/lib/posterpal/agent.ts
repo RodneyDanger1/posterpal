@@ -1,18 +1,38 @@
 import { randomUUID } from "node:crypto";
 import { getSql } from "@/lib/db";
-import { aiAvailable, chatWithProvider, generateCaptionVariants } from "./ai";
+import { aiAvailable, chatWithProvider, draftReplies, generateCaptionVariants, localSentiment } from "./ai";
 import { getPage, getSetting } from "./repo";
 import type { TextProviderId } from "./providers";
 import {
   asSources,
+  browsePublicPages,
   buildPageProfile,
   mapBriefForPage,
   parseResearchJson,
   planSearchQueries,
   researchUserPrompt,
+  urlsFromBrief,
   type PageResearchProfile,
   type ResearchNote,
 } from "./research";
+import { formatDeskSnapshot, snapshotLooksLikeOpsBrief, type DeskSnapshot } from "./desk-context";
+import { hopsFromDesk, rankHops, wantsConnect, wantsFailedFix, wantsInboxDrafts, type AgentHop, type AgentInboxDraft, type AgentCaptionPolicy } from "./agent-hops";
+import {
+  pickPersona,
+  parsePersona,
+  skillsForRun,
+  personaSystemOverlay,
+  PERSONAS,
+  type AgentPersonaId,
+  type AgentSkillId,
+} from "./agent-skills";
+import { remixCaption } from "./briefing";
+import { scheduleWhenForPage } from "./slots";
+import { isBuyingIntent } from "./operator";
+import type { PageRow } from "./types";
+
+export { formatDeskSystemContext, formatDeskSnapshot } from "./desk-context";
+export type { DeskContextBits, DeskSnapshot } from "./desk-context";
 
 export type AgentSource = { title: string; url: string };
 export type AgentResult = {
@@ -28,6 +48,14 @@ export type AgentResult = {
   queries: string[];
   notes: ResearchNote[];
   pagePurpose: string;
+  opsBrief: string;
+  hops: AgentHop[];
+  inboxDrafts: AgentInboxDraft[];
+  captionPolicy: AgentCaptionPolicy | null;
+  nextSlot: string | null;
+  merchUrl: string | null;
+  persona: AgentPersonaId;
+  skills: AgentSkillId[];
   profile: PageResearchProfile | null;
 };
 
@@ -39,7 +67,9 @@ const AGENT_SYSTEM = `You are the research desk for a Facebook Page operator. Yo
 Hard limits (Meta Platform Policy):
 - Never like, follow, share, or post comments.
 - Never tell the operator you will publish. You only draft.
-- Do not scrape Facebook. Use public web search and the operator's desk data (Page name, category, brand voice, merch, recent captions already in the database).
+- Do not scrape Facebook. Use public web search, optional https URLs the operator pasted (never facebook.com HTML), official developers.facebook.com docs, and the operator's desk data.
+- You may explain Meta App ID / Redirect URI / Facebook Login. You never complete Login, never invent an App Secret, never post.
+- The DESK OPS snapshot is live from this operator's database: worker/ticker, queue, failed Graph publishes, inbox, vault, cadence, quota headers, scheduler log. Use it when the brief is about the desk. Never invent Graph calls or claim you queried a diagnostic API.
 - Do not invent quotes, vote totals, court outcomes, hours, or events. If a fact is unverified, say so.
 - Do not write captions that claim an AI still is a documentary photo of a real event.
 - Do not add "written by AI", "made with ChatGPT", "#AIart", or similar to captions. The operator edits and owns the send button. They will disclose if Meta requires it (realistic AI people, branded content #ad).
@@ -64,9 +94,165 @@ function emptyResult(partial: Partial<AgentResult> & { summary: string }): Agent
     queries: [],
     notes: [],
     pagePurpose: "",
+    opsBrief: "",
+    hops: [],
+    inboxDrafts: [],
+    captionPolicy: null,
+    nextSlot: null,
+    merchUrl: null,
+    persona: "research",
+    skills: [],
     profile: null,
     ...partial,
   };
+}
+
+async function attachPublicWeb(brief: string, persona: AgentPersonaId, notes: ResearchNote[]): Promise<ResearchNote[]> {
+  const extra = await browsePublicPages(urlsFromBrief(brief));
+  if (persona === "connect" || wantsConnect(brief)) {
+    try {
+      const { fetchOfficialGuide } = await import("./facebook-docs");
+      const { META_LOGIN_FLOW, META_NO_SCRAPE } = await import("./meta-setup");
+      for (const url of [META_LOGIN_FLOW, META_NO_SCRAPE]) {
+        const g = await fetchOfficialGuide(url);
+        extra.push({
+          heading: g.title,
+          body: g.text.slice(0, 900),
+          url: g.url,
+          confidence: g.live ? "verified" : "unverified",
+        });
+      }
+    } catch {
+      /* official docs are best-effort */
+    }
+  }
+  return [...extra, ...notes].slice(0, 12);
+}
+
+async function loadDeskSystemContext(
+  userId: string,
+  pageId: string,
+): Promise<{ text: string; snap: DeskSnapshot | null }> {
+  try {
+    const { buildDeskSnapshot } = await import("./desk-snapshot");
+    const snap = await buildDeskSnapshot(userId, pageId);
+    return { text: formatDeskSnapshot(snap), snap };
+  } catch {
+    return { text: "", snap: null };
+  }
+}
+
+async function attachAssist(
+  userId: string,
+  page: PageRow,
+  profile: PageResearchProfile,
+  brief: string,
+  snap: DeskSnapshot | null,
+  captions: AgentResult["captions"],
+  persona: AgentPersonaId,
+): Promise<{
+  hops: AgentHop[];
+  inboxDrafts: AgentInboxDraft[];
+  captionPolicy: AgentCaptionPolicy | null;
+  nextSlot: string | null;
+  merchUrl: string | null;
+}> {
+  const merchUrl = profile.merch[0]?.url ?? null;
+  const nextSlot = scheduleWhenForPage(page.posting_slots_json);
+  let hops = hopsFromDesk({ snap, pageId: page.id, storytelling: captions.storytelling });
+  let inboxDrafts: AgentInboxDraft[] = [];
+  if (wantsFailedFix(brief) && snap?.failed.length) {
+    const extras = snap.failed.slice(0, 3).map((f) => ({
+      id: `rewrite-${f.id}`,
+      kind: "composer" as const,
+      label: `Rewrite failed on ${f.pageName}`,
+      href: "/composer",
+      caption: remixCaption(f.message || f.error),
+      postId: f.id,
+    }));
+    hops = [...extras, ...hops];
+  }
+  if (wantsInboxDrafts(brief) && snap?.waitingComments.length) {
+    inboxDrafts = await draftWaitingComments(userId, page, snap.waitingComments.slice(0, 3));
+    hops = [
+      ...inboxDrafts.map((d) => ({
+        id: `inbox-${d.commentId}`,
+        kind: "inbox" as const,
+        label: `Reply to ${d.author}`,
+        href: `/inbox?comment=${encodeURIComponent(d.commentId)}`,
+        commentId: d.commentId,
+      })),
+      ...hops,
+    ];
+  }
+  hops = rankHops(persona, hops, 10);
+  let captionPolicy: AgentCaptionPolicy | null = null;
+  if (captions.storytelling.trim()) {
+    try {
+      const { policyForComposer } = await import("./publish");
+      const pol = await policyForComposer(userId, page.id, captions.storytelling, {
+        link: merchUrl,
+        merchUrl,
+        hasImages: false,
+        missingAlt: false,
+        createdWithAi: false,
+      });
+      captionPolicy = {
+        canPublish: pol.canPublish,
+        flags: pol.flags.map((f) => ({ id: f.id, severity: f.severity, title: f.title })),
+      };
+    } catch {
+      captionPolicy = null;
+    }
+  }
+  return { hops, inboxDrafts, captionPolicy, nextSlot, merchUrl };
+}
+
+async function draftWaitingComments(
+  userId: string,
+  page: PageRow,
+  comments: NonNullable<DeskSnapshot["waitingComments"]>,
+): Promise<AgentInboxDraft[]> {
+  const sql = await getSql();
+  const provider = (await getSetting(userId, "default_text_provider") || "grok") as TextProviderId;
+  const apiKey = await providerKey(userId, provider);
+  const can = provider === "grok" ? aiAvailable() : Boolean(apiKey);
+  const out: AgentInboxDraft[] = [];
+  for (const c of comments) {
+    let drafts: string[];
+    try {
+      drafts = can
+        ? await draftReplies({
+            comment: c.message,
+            brandVoice: page.brand_voice,
+            pageName: c.pageName || page.name,
+            provider,
+            apiKey,
+          })
+        : [
+            "Thanks for writing in — we saw this and will follow up with the details.",
+            "Appreciate the question. Stop by or reply here and we'll sort it out.",
+            "Good catch. Let me confirm and get back to you.",
+          ];
+    } catch {
+      drafts = ["Thanks for writing in — we'll follow up with the details."];
+    }
+    await sql`
+      update comments
+      set reply_drafts_json = ${JSON.stringify(drafts)}, sentiment = ${localSentiment(c.message)}
+      where id = ${c.id} and user_id = ${userId}
+    `;
+    out.push({
+      commentId: c.id,
+      author: c.author,
+      comment: c.message,
+      pageName: c.pageName,
+      pageId: c.pageId,
+      buyingIntent: c.buyingIntent || isBuyingIntent(c.message),
+      drafts,
+    });
+  }
+  return out;
 }
 
 export async function loadPageProfile(userId: string, pageId: string): Promise<PageResearchProfile> {
@@ -77,10 +263,17 @@ export async function loadPageProfile(userId: string, pageId: string): Promise<P
 
 export async function runDeskAgent(
   userId: string,
-  input: { pageId: string; prompt: string; provider?: string; mapPage?: boolean },
+  input: { pageId: string; prompt: string; provider?: string; mapPage?: boolean; persona?: string },
 ): Promise<AgentResult> {
   const refused = agentWouldRefuse(input.prompt);
   if (refused) {
+    const { deskLog } = await import("./log");
+    await deskLog({
+      level: "info",
+      scope: "agent.refuse",
+      userId,
+      message: refused.slice(0, 200),
+    });
     return emptyResult({ summary: refused, refused });
   }
 
@@ -91,15 +284,42 @@ export async function runDeskAgent(
   const provider = (input.provider || (await getSetting(userId, "default_text_provider")) || "grok") as TextProviderId;
   const apiKey = await providerKey(userId, provider);
   const canGrok = aiAvailable();
+  const brief = (input.mapPage ? mapBriefForPage(profile) : input.prompt).trim().slice(0, 2000);
+  const persona: AgentPersonaId = parsePersona(input.persona) ?? pickPersona(brief, input.mapPage);
+  const personaNote = `\n\n${personaSystemOverlay(persona)}`;
+  const desk = await loadDeskSystemContext(userId, input.pageId);
+  const systemContext = desk.text;
+  const persistHealth = snapshotLooksLikeOpsBrief(brief) && Boolean(systemContext);
   if (provider === "grok" && !canGrok && !apiKey) {
     // §17.4: no caption model → still deliver the query plan, Page purpose, and
     // unverified desk-topic notes. Never fake citations; never invent captions.
-    const brief = (input.mapPage ? mapBriefForPage(profile) : input.prompt).trim().slice(0, 2000);
+    // Diagnose Server still gets health/needs/logs in the persisted summary.
     const queries = planSearchQueries(profile, brief);
     const researched = await liveResearch(profile, brief, queries);
-    const captions = offlineCaptions(profile, brief);
+    researched.notes = await attachPublicWeb(brief, persona, researched.notes);
+    const captions = persona === "connect"
+      ? {
+          storytelling:
+            "Open Connect. Paste App ID (digits) and App Secret from Meta → Settings → Basic. Copy this desk’s Redirect URI into Valid OAuth Redirect URIs. Then you click Connect Facebook Login.",
+          cta: "Stay in Development Mode. Add yourself as Admin/Developer/Tester. The Agent cannot complete Login.",
+          question: "Redirect URI must match exactly (127.0.0.1 vs localhost). Client OAuth Login ON. App Domains empty on loopback.",
+        }
+      : offlineCaptions(profile, brief);
+    const assist = await attachAssist(userId, page, profile, brief, desk.snap, captions, persona);
+    const skills = skillsForRun({
+      persona,
+      brief,
+      mapPage: input.mapPage,
+      hasCaptions: Boolean(captions.storytelling),
+      draftedInbox: assist.inboxDrafts.length > 0,
+      rewroteFailed: wantsFailedFix(brief) && (desk.snap?.failed.length ?? 0) > 0,
+      snap: desk.snap,
+    });
     const laterTitle = (brief.split(/[\n.?!]/)[0] ?? "Idea").trim().slice(0, 60) || "Idea";
     const runId = randomUUID();
+    const summary = persistHealth
+      ? `${researched.summary}\n${systemContext}`.slice(0, 4000)
+      : researched.summary.slice(0, 4000);
     const sql = await getSql();
     const draftsPayload = JSON.stringify({
       ...captions,
@@ -107,16 +327,33 @@ export async function runDeskAgent(
       queries,
       notes: researched.notes,
       pagePurpose: profile.purpose,
+      opsBrief: systemContext,
+      hops: assist.hops,
+      inboxDrafts: assist.inboxDrafts,
+      captionPolicy: assist.captionPolicy,
+      nextSlot: assist.nextSlot,
+      merchUrl: assist.merchUrl,
+      persona,
+      skills,
     });
     await sql`
       insert into agent_runs (id, user_id, page_id, prompt, summary, drafts_json, sources_json, image_prompt)
       values (
-        ${runId}, ${userId}, ${input.pageId}, ${brief.slice(0, 2000)}, ${researched.summary.slice(0, 4000)},
+        ${runId}, ${userId}, ${input.pageId}, ${brief.slice(0, 2000)}, ${summary},
         ${draftsPayload}, '[]', ''
       )
     `;
+    await sql`delete from agent_runs where user_id = ${userId} and created_at < now() - interval '30 days'`;
+    const { deskLog } = await import("./log");
+    await deskLog({
+      level: "info",
+      scope: "agent.run",
+      userId,
+      message: `${PERSONAS[persona].label} · ${skills.join(", ") || "none"} · ${assist.hops.length} hops`,
+      extra: { runId, pageId: page.id, persona, skills },
+    });
     return {
-      summary: researched.summary,
+      summary,
       sources: [],
       captions,
       imagePrompt: "",
@@ -128,31 +365,48 @@ export async function runDeskAgent(
       queries,
       notes: researched.notes,
       pagePurpose: profile.purpose,
+      opsBrief: systemContext,
+      hops: assist.hops,
+      inboxDrafts: assist.inboxDrafts,
+      captionPolicy: assist.captionPolicy,
+      nextSlot: assist.nextSlot,
+      merchUrl: assist.merchUrl,
+      persona,
+      skills,
       profile,
     };
   }
 
-  const brief = (input.mapPage ? mapBriefForPage(profile) : input.prompt).trim().slice(0, 2000);
   const queries = planSearchQueries(profile, brief);
   const researched = await liveResearch(profile, brief, queries);
+  researched.notes = await attachPublicWeb(brief, persona, researched.notes);
 
   let captions = { storytelling: "", cta: "", question: "" };
-  try {
-    captions = await generateCaptionVariants({
-      brief: `${brief}\n\nPage purpose: ${profile.purpose}\n\nResearch notes:\n${researched.summary.slice(0, 1800)}`,
-      brandVoice: page.brand_voice,
-      pageName: page.name,
-      merchCta: profile.merch[0] ? `${profile.merch[0].title} ${profile.merch[0].url}` : null,
-      provider,
-      apiKey,
-    });
-  } catch (e) {
+  if (persona === "connect") {
     captions = {
-      storytelling: researched.summary.slice(0, 500),
-      cta: "",
-      question: "",
+      storytelling:
+        "Open Connect. Paste App ID (digits) and App Secret from Meta → Settings → Basic. Copy this desk’s Redirect URI into Valid OAuth Redirect URIs. Then you click Connect Facebook Login.",
+      cta: "Stay in Development Mode. Add yourself as Admin/Developer/Tester. The Agent cannot complete Login.",
+      question: "Redirect URI must match exactly (127.0.0.1 vs localhost). Client OAuth Login ON. App Domains empty on loopback.",
     };
-    if (!researched.summary) throw e;
+  } else {
+    try {
+      captions = await generateCaptionVariants({
+        brief: `${brief}${personaNote}\n\nPage purpose: ${profile.purpose}${systemContext}\n\nResearch notes:\n${researched.summary.slice(0, 1800)}`,
+        brandVoice: page.brand_voice,
+        pageName: page.name,
+        merchCta: profile.merch[0] ? `${profile.merch[0].title} ${profile.merch[0].url}` : null,
+        provider,
+        apiKey,
+      });
+    } catch (e) {
+      captions = {
+        storytelling: researched.summary.slice(0, 500),
+        cta: "",
+        question: "",
+      };
+      if (!researched.summary) throw e;
+    }
   }
 
   let imagePrompt = researched.imageHint || "";
@@ -162,6 +416,19 @@ export async function runDeskAgent(
   const laterTitle = (brief.split(/[\n.?!]/)[0] ?? "Idea").trim().slice(0, 60) || "Idea";
   const runId = randomUUID();
   const topics = (researched.topics.length ? researched.topics : profile.topics).slice(0, 8);
+  const assist = await attachAssist(userId, page, profile, brief, desk.snap, captions, persona);
+  const skills = skillsForRun({
+    persona,
+    brief,
+    mapPage: input.mapPage,
+    hasCaptions: Boolean(captions.storytelling),
+    draftedInbox: assist.inboxDrafts.length > 0,
+    rewroteFailed: wantsFailedFix(brief) && (desk.snap?.failed.length ?? 0) > 0,
+    snap: desk.snap,
+  });
+  const summary = persistHealth
+    ? `${researched.summary}\n${systemContext}`.slice(0, 4000)
+    : researched.summary.slice(0, 4000);
   const sql = await getSql();
   const draftsPayload = JSON.stringify({
     ...captions,
@@ -169,17 +436,34 @@ export async function runDeskAgent(
     queries,
     notes: researched.notes,
     pagePurpose: profile.purpose,
+    opsBrief: systemContext,
+    hops: assist.hops,
+    inboxDrafts: assist.inboxDrafts,
+    captionPolicy: assist.captionPolicy,
+    nextSlot: assist.nextSlot,
+    merchUrl: assist.merchUrl,
+    persona,
+    skills,
   });
   await sql`
     insert into agent_runs (id, user_id, page_id, prompt, summary, drafts_json, sources_json, image_prompt)
     values (
-      ${runId}, ${userId}, ${input.pageId}, ${brief.slice(0, 2000)}, ${researched.summary.slice(0, 4000)},
+      ${runId}, ${userId}, ${input.pageId}, ${brief.slice(0, 2000)}, ${summary},
       ${draftsPayload}, ${JSON.stringify(researched.sources)}, ${imagePrompt}
     )
   `;
+  await sql`delete from agent_runs where user_id = ${userId} and created_at < now() - interval '30 days'`;
+  const { deskLog } = await import("./log");
+  await deskLog({
+    level: "info",
+    scope: "agent.run",
+    userId,
+    message: `${PERSONAS[persona].label} · ${skills.join(", ") || "none"} · ${assist.hops.length} hops`,
+    extra: { runId, pageId: page.id, persona, skills },
+  });
 
   return {
-    summary: researched.summary,
+    summary,
     sources: researched.sources,
     captions,
     imagePrompt,
@@ -191,6 +475,14 @@ export async function runDeskAgent(
     queries,
     notes: researched.notes,
     pagePurpose: profile.purpose,
+    opsBrief: systemContext,
+    hops: assist.hops,
+    inboxDrafts: assist.inboxDrafts,
+    captionPolicy: assist.captionPolicy,
+    nextSlot: assist.nextSlot,
+    merchUrl: assist.merchUrl,
+    persona,
+    skills,
     profile,
   };
 }
@@ -199,6 +491,7 @@ async function providerKey(userId: string, provider: string): Promise<string | n
   if (provider === "openai") return getSetting(userId, "openai_api_key");
   if (provider === "gemini") return getSetting(userId, "google_api_key");
   if (provider === "deepseek") return getSetting(userId, "deepseek_api_key");
+  if (provider === "flux") return getSetting(userId, "fal_api_key");
   return null;
 }
 

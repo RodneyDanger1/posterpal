@@ -20,6 +20,7 @@ const ROUTES = [
   "/merchandise",
   "/vault",
   "/settings",
+  "/connect",
   "/pair",
   "/setup",
 ] as const;

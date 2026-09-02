@@ -1,4 +1,4 @@
-import { Link, useRouterState } from "@tanstack/react-router";
+import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
 import {
   BarChart3,
   Bookmark,
@@ -13,6 +13,7 @@ import {
   Search,
   Settings,
   ShoppingBag,
+  Plug,
   FileText,
   Moon,
   Sparkles,
@@ -35,6 +36,7 @@ import { Hint } from "./ui/tooltip";
 import { CommandPalette } from "./command-palette";
 import { MobileNav } from "./mobile-nav";
 import { NeedsBell } from "./needs-bell";
+import { PageSwitcher } from "./page-switcher";
 import { PostInspector } from "./post-inspector";
 import { ShortcutHelp } from "./shortcut-help";
 
@@ -49,6 +51,7 @@ const NAV = [
   { to: "/analytics", label: "Analytics", icon: BarChart3, hint: "Reactions, comments, shares. Page Insights metrics need 100+ likes on the Page." },
   { to: "/media", label: "Media", icon: ImageIcon, hint: "Files attached to posts, plus Imagine (Grok) image generation." },
   { to: "/merchandise", label: "Merchandise", icon: ShoppingBag, hint: "Product links with UTM. Inserted into Composer as a CTA — you still add a branded-content disclosure." },
+  { to: "/connect", label: "Connect", icon: Plug, hint: "Create a Meta app, paste App ID/Secret, official Facebook Login. Graph v26.0 only — never scraping." },
   { to: "/vault", label: "Token vault", icon: KeyRound, hint: "Encrypted Facebook user tokens and the scheduler log. Graph 190 means reconnect." },
   { to: "/settings", label: "Settings", icon: Settings, hint: "Facebook App ID/Secret, BYO AI keys (OpenAI, Gemini, DeepSeek, Flux), cadence caps, brand voice." },
 ] as const;
@@ -56,11 +59,13 @@ const NAV = [
 export function AppShell({ children, right }: { children: React.ReactNode; right?: React.ReactNode }) {
   const { user, isPending } = useCurrentUserState();
   const pathname = useRouterState({ select: (s) => s.location.pathname });
+  const navigate = useNavigate();
   const { selectedPageId, setSelectedPageId, setCommandOpen, theme, setTheme } = useShellStore();
   const [data, setData] = useState<HomeSnapshot | null>(null);
   const [railOpen, setRailOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [syncing, setSyncing] = useState(false);
+  const [deskChip, setDeskChip] = useState<"live" | "idle" | "down" | null>(null);
 
   useEffect(() => {
     if (!user) return;
@@ -72,28 +77,61 @@ export function AppShell({ children, right }: { children: React.ReactNode; right
         if (snap.settings.theme && snap.settings.theme !== theme) setTheme(snap.settings.theme);
         adoptLivePageId(snap.pages.map((p) => p.id), snap.settings.defaultPageId);
       })
-      .catch((e: unknown) => toast.error(e instanceof Error ? e.message : "Could not load workspace"));
+      .catch((e: unknown) => {
+        const msg = e instanceof Error ? e.message : "Could not load workspace";
+        toast.error(msg);
+        void import("@/lib/posterpal/fns").then(({ reportClientErrorFn }) =>
+          reportClientErrorFn({ data: { message: msg, scope: "shell.bootstrap" } }).catch(() => undefined),
+        );
+      });
+    const applyHealth = (h: { db?: string; schedulerFresh?: boolean; workerFresh?: boolean; tickerFresh?: boolean }) => {
+      if (h.db !== "up") setDeskChip("down");
+      else if (h.tickerFresh || h.schedulerFresh || h.workerFresh) setDeskChip("live");
+      else setDeskChip("idle");
+    };
+    const health = window.setInterval(() => {
+      void fetch("/api/health", { cache: "no-store" })
+        .then((r) => r.json())
+        .then(applyHealth)
+        .catch(() => setDeskChip("down"));
+    }, 30_000);
+    void fetch("/api/health", { cache: "no-store" })
+      .then((r) => r.json())
+      .then(applyHealth)
+      .catch(() => setDeskChip("down"));
     const t = window.setInterval(() => {
       void tickFn().catch((e: unknown) => {
-        toast.error(e instanceof Error ? e.message : "Local scheduler stalled. Due posts are in Needs you.");
+        const msg = e instanceof Error ? e.message : "Local scheduler stalled. Due posts are in Needs you.";
+        toast.error(msg);
+        void import("@/lib/posterpal/fns").then(({ reportClientErrorFn }) =>
+          reportClientErrorFn({ data: { message: msg, scope: "shell.tick" } }).catch(() => undefined),
+        );
       });
     }, 60_000);
     return () => {
       cancelled = true;
       window.clearInterval(t);
+      window.clearInterval(health);
     };
   }, [user]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      const typing = Boolean(t && (t.tagName === "TEXTAREA" || t.tagName === "INPUT" || t.isContentEditable));
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();
         setCommandOpen(true);
+        return;
+      }
+      if (!typing && !e.metaKey && !e.ctrlKey && !e.altKey && e.key.toLowerCase() === "n") {
+        e.preventDefault();
+        void navigate({ to: "/composer" });
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [setCommandOpen]);
+  }, [setCommandOpen, navigate]);
 
   const pages = data?.pages ?? [];
   const selected = pages.find((p) => p.id === selectedPageId) ?? pages[0] ?? null;
@@ -132,7 +170,7 @@ export function AppShell({ children, right }: { children: React.ReactNode; right
 
       <aside
         className={cn(
-          "fixed inset-y-0 left-0 z-40 flex w-[280px] shrink-0 flex-col border-r border-border bg-rail md:static md:translate-x-0",
+          "fixed inset-y-0 left-0 z-40 flex h-full w-[280px] shrink-0 flex-col border-r border-border bg-rail md:static md:h-auto md:translate-x-0",
           railOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0",
         )}
       >
@@ -157,7 +195,7 @@ export function AppShell({ children, right }: { children: React.ReactNode; right
           </div>
         </div>
 
-        <ScrollArea className="max-h-52 px-2">
+        <ScrollArea className="min-h-0 flex-1 px-2">
           {filteredPages.length === 0 ? (
             <p className="px-2 py-3 text-[13px] text-muted-foreground">
               {pages.length === 0 ? "No Pages yet. Connect Facebook in Settings, or use practice Pages." : "No match."}
@@ -178,18 +216,23 @@ export function AppShell({ children, right }: { children: React.ReactNode; right
           )}
         </ScrollArea>
 
-        <nav className="mt-2 flex-1 space-y-0.5 overflow-y-auto px-2 pb-4">
+        <nav className="mt-2 max-h-[42%] shrink-0 space-y-0.5 overflow-y-auto px-2 pb-4">
           {NAV.map((item) => {
             const Icon = item.icon;
             const active = item.to === "/" ? pathname === "/" : pathname.startsWith(item.to);
-            const badge = item.to === "/inbox" && data && data.inboxCount > 0 ? data.inboxCount : null;
+            const badge =
+              item.to === "/inbox" && data && data.inboxCount > 0
+                ? data.inboxCount
+                : item.to === "/drafts" && data && data.failedCount > 0
+                  ? data.failedCount
+                  : null;
             return (
               <Hint key={item.to} label={item.hint} side="right">
                 <Link
                   to={item.to}
                   onClick={() => setRailOpen(false)}
                   className={cn(
-                    "flex h-10 items-center gap-3 rounded-md px-3 text-[14px] font-medium",
+                    "relative flex h-10 items-center gap-3 rounded-md px-3 text-[14px] font-medium transition-colors duration-150",
                     active ? "bg-accent text-accent-foreground" : "text-foreground hover:bg-muted",
                   )}
                 >
@@ -212,6 +255,7 @@ export function AppShell({ children, right }: { children: React.ReactNode; right
           <Button variant="ghost" size="icon" className="md:hidden" onClick={() => setRailOpen(true)} aria-label="Open navigation">
             <Menu className="size-5" />
           </Button>
+          <PageSwitcher pages={pages} selected={selected} />
           <button
             type="button"
             onClick={() => setCommandOpen(true)}
@@ -286,12 +330,39 @@ export function AppShell({ children, right }: { children: React.ReactNode; right
                 {theme === "dark" ? <Sun className="size-4" /> : <Moon className="size-4" />}
               </Button>
             </Hint>
+            {deskChip ? (
+              <span
+                className={`hidden items-center gap-1.5 rounded-full px-2 py-0.5 text-[11px] font-semibold sm:inline-flex ${
+                  deskChip === "live"
+                    ? "bg-success/15 text-success"
+                    : deskChip === "idle"
+                      ? "bg-warning/20 text-warning"
+                      : "bg-destructive/15 text-destructive"
+                }`}
+                title={
+                  deskChip === "live"
+                    ? "Database is up and a ticker (in-tab or worker) ran in the last 3 minutes."
+                    : deskChip === "idle"
+                      ? "Database is up but no ticker in 3 minutes. Due LocalScheduled posts wait in Needs you. Keep the desk open or npm run worker."
+                      : "Desk database is down — reopen PosterPal.exe"
+                }
+              >
+                <span
+                  className={`size-1.5 rounded-full ${
+                    deskChip === "live" ? "bg-success" : deskChip === "idle" ? "bg-warning" : "bg-destructive"
+                  }`}
+                />
+                {deskChip === "live" ? "Desk live" : deskChip === "idle" ? "Desk idle" : "Desk down"}
+              </span>
+            ) : null}
             <UserButton />
           </div>
         </header>
 
         <div className="flex min-h-0 flex-1">
-          <main className="min-w-0 flex-1 overflow-auto p-3 pb-[calc(4.5rem+env(safe-area-inset-bottom))] md:p-4 md:pb-4">{children}</main>
+          <main className="page-enter min-w-0 flex-1 overflow-auto p-3 pb-[calc(4.5rem+env(safe-area-inset-bottom))] md:p-4 md:pb-4">
+            {children}
+          </main>
           {right ? (
             <aside className="hidden w-[320px] shrink-0 overflow-auto border-l border-border bg-card p-4 xl:block">
               {right}
@@ -332,11 +403,11 @@ function PageRowButton({
         type="button"
         onClick={onClick}
         className={cn(
-          "mb-0.5 flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left",
+          "mb-0.5 flex min-h-11 w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors duration-150",
           active ? "bg-accent" : "hover:bg-muted",
         )}
       >
-        <PageAvatar id={page.id} name={page.name} size={32} />
+        <PageAvatar id={page.id} name={page.name} pictureUrl={page.picture_url} size={32} ring={active} />
         <span className="min-w-0 flex-1">
           <span className="block truncate text-[13px] font-semibold">{page.name}</span>
           <span className="block text-[11px] text-muted-foreground tabular-nums">

@@ -1,13 +1,15 @@
-# PosterPal for Windows (WPF / .NET 9)
+# PosterPal for Windows
 
-This folder is the **Windows 10/11 x64** desktop source. It cannot be compiled in the Linux environment that hosts the live PosterPal web desk — compile it on a Windows machine with the .NET 9 SDK.
+The product you run is the **Electron desk** at the repo root — not this folder.
 
-The live product you are using is the web PosterPal (same Graph v26.0 rules, same composer/inbox/calendar). This solution is the native shell specified for DPAPI, SQLite under `%AppData%\PosterPal`, and a self-contained `win-x64` exe.
+| What | Where |
+| --- | --- |
+| Windows app | Double-click `PosterPal.bat`, or `npm run desktop`, or the portable EXE from `npm run desktop:build` (`release/PosterPal-1.0.0.exe`) |
+| Data | `%APPDATA%\PosterPal\pglite` (PGLite) and `master.key` |
+| Phone | Same Wi‑Fi. APK is a WebView of `http://<pc-lan-ip>:8080`. Facebook Login stays on the PC. |
 
-```powershell
-.\build.ps1
-```
+This `desktop/` folder is a **.NET 9 class library** (`PosterPal.Core`) with HMAC `appsecret_proof` and Jaccard tests. There is no WPF UI. `build.ps1` does not produce `PosterPal.exe`.
 
-Outputs `artifacts/publish\PosterPal.exe` (PublishSingleFile, self-contained, no trim / no AOT).
+Facebook Redirect URI for the real Windows app:
 
-See the root [SETUP.md](../SETUP.md) for Facebook App configuration. Loopback redirect is **exactly** `http://127.0.0.1:55443/callback/` — if that port is in use, the app shows an actionable error and does not pick a random port.
+`http://127.0.0.1:8080/api/facebook/callback`

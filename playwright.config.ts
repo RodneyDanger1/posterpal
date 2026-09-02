@@ -28,7 +28,7 @@ export default defineConfig({
     command:
       "cross-env VITE_AUTH_ENABLED=false PGLITE_MEMORY=1 vite dev --host 0.0.0.0 --port 8081",
     url: "http://localhost:8081",
-    reuseExistingServer: false,
+    reuseExistingServer: !process.env.CI,
     timeout: 120_000, // cold Vite boot was measured at ~44s on this box
   },
 });

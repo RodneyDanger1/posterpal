@@ -67,8 +67,27 @@ export async function getSessionUser(
  * otherwise — there is no silent single-operator fallback on a public host.
  */
 export async function requireUserId(bearerToken?: string): Promise<string> {
+  let token = bearerToken?.trim() || "";
+  if (!token) {
+    try {
+      const request = getRequest();
+      const header = request?.headers.get("authorization") ?? "";
+      const m = /^Bearer\s+(\S+)/i.exec(header);
+      if (m?.[1]) token = m[1];
+    } catch {
+      /* no request */
+    }
+  }
+
+  if (token.startsWith("ppd_")) {
+    const { resolveDeviceToken } = await import("@/lib/posterpal/devices");
+    const device = await resolveDeviceToken(token);
+    if (!device) throw new UnauthorizedError();
+    return device.userId;
+  }
+
   if (!authConfigured) return DEV_USER_ID;
-  const user = await getSessionUser(bearerToken);
+  const user = await getSessionUser(token || undefined);
   if (!user) throw new UnauthorizedError();
   return user.id;
 }

@@ -24,11 +24,15 @@ import {
   saveSnippetFn,
   snippetsFn,
   imaginePhotoFn,
+  savePrefs,
   runAgentFn,
   analyzeFn,
   listPostsFn,
+  unfurlLinkFn,
 } from "@/lib/posterpal/fns";
 import { applyUtm, captionHint, captionStats, countHashtags, formatSlotLabel, hasCallToAction, hourHeatmap, isQuietHour, nextDatetimeLocal, publishToast, suggestedIndustrySlot, topSlots, trimHashtags, type HeatCell } from "@/lib/posterpal/operator";
+import { inspectLink, withDefaultUtm } from "@/lib/posterpal/briefing";
+import { nextPostingSlot, slotsOrDefault, slotLabel, toLocalInput as slotToLocal } from "@/lib/posterpal/slots";
 import { IMAGE_PROVIDERS, TEXT_PROVIDERS } from "@/lib/posterpal/providers";
 import type { CadenceResult, MediaLibraryItem, MerchRow, PageRow, PolicyResult, SettingsBag, SnippetRow } from "@/lib/posterpal/types";
 import { useShellStore } from "@/lib/store";
@@ -50,6 +54,7 @@ type MediaFile = {
   durationMs?: number;
   altText: string;
   createdWithAi: boolean;
+  assetId?: string;
 };
 
 function ComposerPage() {
@@ -93,12 +98,16 @@ function useComposerState() {
   const [bestSlots, setBestSlots] = useState<HeatCell[]>([]);
 
   useEffect(() => {
-    void bootstrapApp().then((snap) => setPages(snap.pages));
-    void getSettingsFn().then((s) => {
-      setSettings(s);
-      setTextProvider(s.defaultTextProvider);
-      setImageProvider(s.defaultImageProvider);
-    });
+    void bootstrapApp()
+      .then((snap) => setPages(snap.pages))
+      .catch((e: unknown) => toast.error(e instanceof Error ? e.message : "Could not load Pages"));
+    void getSettingsFn()
+      .then((s) => {
+        setSettings(s);
+        setTextProvider(s.defaultTextProvider);
+        setImageProvider(s.defaultImageProvider);
+      })
+      .catch((e: unknown) => toast.error(e instanceof Error ? e.message : "Could not load settings"));
   }, []);
 
   useEffect(() => {
@@ -116,6 +125,7 @@ function useComposerState() {
           dataUrl: m.dataUrl,
           altText: m.altText,
           createdWithAi: m.createdWithAi,
+          assetId: m.assetId,
         })),
       );
     }
@@ -125,10 +135,14 @@ function useComposerState() {
     }
     if (prefill.link) setLink(prefill.link);
     if (prefill.imagePrompt) setImagePrompt(prefill.imagePrompt);
+    if (prefill.firstComment) setFirstComment(prefill.firstComment);
+    if (prefill.recycleAfterDays != null && prefill.recycleAfterDays > 0) {
+      setRecycleDays(String(prefill.recycleAfterDays));
+    }
     setPrefill(null);
   }, [prefill, setPrefill, setPageId]);
 
-  const selected = pages.find((p) => p.id === pageId) ?? pages[0];
+  const selected = pages.find((p) => p.id === pageId) ?? (pageId ? undefined : pages[0]);
 
   useEffect(() => {
     if (!selected) return;
@@ -139,10 +153,27 @@ function useComposerState() {
       .then(setLibrary)
       .catch(() => setLibrary([]));
     void listPostsFn({ data: { pageId: selected.id, status: "Published", limit: 50 } })
-      .then((posts) => setBestSlots(topSlots(hourHeatmap(posts), 3)))
+      .then((posts) => setBestSlots(topSlots(hourHeatmap(posts, settings?.timezone), 3)))
       .catch(() => setBestSlots([]));
     setAlsoPageIds((ids) => ids.filter((id) => id !== selected.id));
-  }, [selected?.id]);
+  }, [selected?.id, settings?.timezone]);
+
+  useEffect(() => {
+    if (!library.length) return;
+    setMedia((prev) =>
+      prev.map((m) => {
+        if (m.dataUrl) return m;
+        const hit = library.find((l) => (m.assetId && l.id === m.assetId) || l.file_name === m.fileName);
+        if (!hit?.data_url) return m;
+        return {
+          ...m,
+          dataUrl: hit.data_url,
+          mimeType: hit.mime_type || m.mimeType,
+          altText: m.altText || hit.alt_text || m.fileName,
+        };
+      }),
+    );
+  }, [library]);
 
   useEffect(() => {
     if (!selected) return;
@@ -156,11 +187,12 @@ function useComposerState() {
           hasImages: media.length > 0,
           missingAlt: media.some((m) => !m.altText.trim()),
           createdWithAi: media.some((m) => m.createdWithAi),
+          mediaType,
         },
       }).then(setPolicy).catch(() => setPolicy(null));
     }, 250);
     return () => window.clearTimeout(t);
-  }, [message, link, media, merch, selected?.id, selectedMerchId]);
+  }, [message, link, media, merch, selected?.id, selectedMerchId, mediaType]);
 
   return {
     pages,
@@ -218,6 +250,21 @@ function Composer() {
   const stats = captionStats(s.message);
   const tags = countHashtags(s.message);
   const reuse = s.library.filter((r) => typeof r.data_url === "string" && r.data_url).slice(0, 6);
+  const [unfurl, setUnfurl] = useState<{ title: string; description: string | null; image: string | null; host: string } | null>(null);
+
+  useEffect(() => {
+    const url = s.link.trim();
+    if (!url || url.length < 8) {
+      setUnfurl(null);
+      return;
+    }
+    const t = window.setTimeout(() => {
+      void unfurlLinkFn({ data: { url } })
+        .then(setUnfurl)
+        .catch(() => setUnfurl(null));
+    }, 500);
+    return () => window.clearTimeout(t);
+  }, [s.link]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -246,7 +293,9 @@ function Composer() {
   if (!s.selected) {
     return (
       <div className="rounded-xl bg-card p-6 text-sm text-muted-foreground shadow-card">
-        No Pages yet. Open Settings to connect Facebook, or seed practice Pages from the home screen.
+        {s.pages.length
+          ? "That Page is no longer on this desk. Pick one from the rail — Composer will not remap onto another Page."
+          : "No Pages yet. Open Settings to connect Facebook, or seed practice Pages from the home screen."}
       </div>
     );
   }
@@ -258,11 +307,22 @@ function Composer() {
         title="Composer"
         hint={`${s.selected.name}${s.selected.is_read_only ? " · analyze-only" : ""}. Ctrl+Enter sends the selected mode. Ctrl+S saves a local draft. Esc clears. Publish now hits Graph immediately. Schedule uses Facebook if the time is 10 minutes–30 days out; otherwise the local scheduler keeps it. Local draft never leaves this machine. Facebook draft is unpublished (published=false, no time) per the Pages API.`}
       >
-        <BulkScheduler
-          pages={s.pages.map((p) => ({ id: p.id, name: p.name }))}
-          selectedPageId={s.selected.id}
-        />
+        <BulkScheduler selectedPageId={s.selected.id} />
       </PageHeader>
+      {s.textProvider !== "grok" &&
+      s.settings &&
+      !s.settings.providers[s.textProvider as keyof SettingsBag["providers"]] ? (
+        <p className="rounded-lg bg-warning/15 px-3 py-2 text-[13px]">
+          Caption model {s.textProvider} has no key on this desk. Paste it in Settings or switch to a model that is ready.
+        </p>
+      ) : null}
+      {s.imageProvider !== "grok" &&
+      s.settings &&
+      !s.settings.providers[s.imageProvider as keyof SettingsBag["providers"]] ? (
+        <p className="rounded-lg bg-warning/15 px-3 py-2 text-[13px]">
+          Image model {s.imageProvider} has no key on this desk. Paste it in Settings — generated stills will fail until you do.
+        </p>
+      ) : null}
       {s.pages.length > 1 ? (
         <div className="space-y-2">
           <label className="flex flex-wrap items-center gap-2 text-[13px]">
@@ -281,13 +341,13 @@ function Composer() {
             </select>
           </label>
           <div>
-            <div className="text-[13px] font-medium">Also post to</div>
+            <div className="text-[13px] font-medium">Also draft on</div>
             <p className="text-[12px] text-muted-foreground">
-              Same caption and media, a separate row per Page. Each Page still has its own cadence and policy. You click Send once.
+              Saves a LocalDraft on each extra Page for you to rewrite. Identical captions across unique Pages look like a spam network — policy will block a copy-paste send.
             </p>
             <div className="mt-2 flex flex-wrap gap-2">
               {s.pages
-                .filter((p) => p.id !== s.selected.id)
+                .filter((p) => p.id !== s.selected?.id)
                 .map((p) => {
                   const on = s.alsoPageIds.includes(p.id);
                   return (
@@ -319,6 +379,16 @@ function Composer() {
         </div>
       ) : null}
 
+      {s.mediaType === "Reel" && s.cadence && s.cadence.reelLevel !== "ok" ? (
+        <div
+          className={`rounded-lg px-3 py-2 text-sm ${
+            s.cadence.reelLevel === "block" ? "bg-destructive/10 text-destructive" : "bg-warning/20"
+          }`}
+        >
+          {s.cadence.reelLast24h} API Reels in 24h (warn {s.cadence.reelWarnAt}, Meta cap {s.cadence.reelBlockAt} on POST /{"{page}"}/video_reels). Scheduled Reels count at send time.
+        </div>
+      ) : null}
+
       <Card>
         <CardContent className="space-y-3 pt-4">
           <div className="flex flex-wrap gap-1">
@@ -335,7 +405,7 @@ function Composer() {
                         : k === "Video"
                           ? "/{page}/videos. Needs publish_video."
                           : k === "Reel"
-                            ? "9:16, 3–60s, min 540×960. rupload."
+                            ? "9:16, 3–90s, min 540×960. rupload. Meta caps 30 API Reels / 24h."
                             : "24h Story via photo_stories or video_stories."
                 }
               >
@@ -395,6 +465,41 @@ function Composer() {
             <div className="space-y-1.5">
               <Label>Link</Label>
               <Input value={s.link} onChange={(e) => s.setLink(e.target.value)} placeholder="https://" />
+              {(() => {
+                const info = inspectLink(s.link);
+                if (!info) return null;
+                return (
+                  <div className="space-y-1">
+                    <p className={`text-[12px] ${info.warning ? "text-warning" : "text-muted-foreground"}`}>
+                      {info.ok ? info.host : "Invalid URL"}
+                      {info.hasUtm ? " · UTM on" : ""}
+                      {info.warning ? ` · ${info.warning}` : ""}
+                    </p>
+                    {info.ok && (!info.hasUtm || !info.isHttps) ? (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        className="h-8"
+                        onClick={() => s.setLink(withDefaultUtm(s.link))}
+                      >
+                        Fix link (https + UTM)
+                      </Button>
+                    ) : null}
+                    {unfurl ? (
+                      <div className="flex gap-2 overflow-hidden rounded-lg border border-border bg-muted/40">
+                        {unfurl.image ? (
+                          <img src={unfurl.image} alt="" className="h-16 w-16 shrink-0 object-cover" referrerPolicy="no-referrer" />
+                        ) : null}
+                        <div className="min-w-0 p-2">
+                          <div className="truncate text-[12px] font-semibold">{unfurl.title}</div>
+                          <div className="truncate text-[11px] text-muted-foreground">{unfurl.host}</div>
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
+                );
+              })()}
             </div>
             <div className="space-y-1.5">
               <Label>First comment (posted on Graph right after a live publish)</Label>
@@ -493,12 +598,14 @@ function Composer() {
               media={s.media}
               setMedia={s.setMedia}
               mediaType={s.mediaType}
+              setMediaType={s.setMediaType}
               imagePrompt={s.imagePrompt}
               setImagePrompt={s.setImagePrompt}
               imageProvider={s.imageProvider}
               caption={s.message}
               busy={s.busy}
               setBusy={s.setBusy}
+              pageId={s.selected.id}
             />
           ) : null}
 
@@ -560,6 +667,26 @@ function Composer() {
                         </Button>
                       </Hint>
                     )}
+                <Hint label="Next hour from this Page's posting slots in Settings. Default: Tue 10am, Wed 11am, Thu 10am local.">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    type="button"
+                    onClick={() => {
+                      const next = nextPostingSlot(slotsOrDefault(s.selected?.posting_slots_json));
+                      if (next) {
+                        s.setWhen(slotToLocal(next));
+                        s.setMode("schedule");
+                      }
+                    }}
+                  >
+                    Next queue slot
+                    {(() => {
+                      const n = nextPostingSlot(slotsOrDefault(s.selected?.posting_slots_json));
+                      return n ? ` · ${slotLabel({ day: n.getDay(), hour: n.getHours() })}` : "";
+                    })()}
+                  </Button>
+                </Hint>
               </div>
             ) : null}
             {s.mode === "schedule" && s.when && isQuietHour(s.when) ? (
@@ -568,7 +695,7 @@ function Composer() {
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            <Hint label="Recycling: the background worker drafts a copy of this post for your approval this many days after it publishes. You review and schedule the copy — it never auto-posts.">
+            <Hint label="Recycling: after this many days the desk drafts a rewrite-marked copy. You still edit and click Send. It never auto-posts, and the original only recycles once.">
               <label className="flex items-center gap-2 text-[12px] text-muted-foreground">
                 Recycle every
                 <Input
@@ -670,7 +797,7 @@ function Composer() {
                 disabled={s.busy || !s.message.trim()}
                 onClick={() => {
                   s.setBusy(true);
-                  void analyzeFn({ data: { content: s.message } })
+                  void analyzeFn({ data: { content: s.message, provider: s.textProvider } })
                     .then((a) => {
                       const bits = [
                         a.sentiment ? `Tone: ${a.sentiment}` : null,
@@ -693,7 +820,7 @@ function Composer() {
                 onClick={() => {
                   s.setBusy(true);
                   void runAgentFn({
-                    data: { pageId: s.selected!.id, prompt: s.message, provider: s.textProvider },
+                    data: { pageId: s.selected!.id, prompt: s.message, provider: s.textProvider, persona: "research" },
                   })
                     .then((r) => {
                       if (r.refused) {
@@ -740,9 +867,13 @@ function Composer() {
             <div className="space-y-1">
               <Label>Caption model</Label>
               <select
-                className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
+                className="h-11 w-full rounded-md border border-input bg-background px-2 text-sm"
                 value={s.textProvider}
-                onChange={(e) => s.setTextProvider(e.target.value)}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  s.setTextProvider(v);
+                  void savePrefs({ data: { defaultTextProvider: v } });
+                }}
               >
                 {TEXT_PROVIDERS.map((p) => (
                   <option key={p.id} value={p.id}>
@@ -755,9 +886,13 @@ function Composer() {
             <div className="space-y-1">
               <Label>Image model</Label>
               <select
-                className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
+                className="h-11 w-full rounded-md border border-input bg-background px-2 text-sm"
                 value={s.imageProvider}
-                onChange={(e) => s.setImageProvider(e.target.value)}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  s.setImageProvider(v);
+                  void savePrefs({ data: { defaultImageProvider: v } });
+                }}
               >
                 {IMAGE_PROVIDERS.map((p) => (
                   <option key={p.id} value={p.id}>
@@ -949,22 +1084,26 @@ function MediaDrop({
   media,
   setMedia,
   mediaType,
+  setMediaType,
   imagePrompt,
   setImagePrompt,
   imageProvider,
   caption,
   busy,
   setBusy,
+  pageId,
 }: {
   media: MediaFile[];
   setMedia: (m: MediaFile[]) => void;
   mediaType: MediaKind;
+  setMediaType: (k: MediaKind) => void;
   imagePrompt: string;
   setImagePrompt: (v: string) => void;
   imageProvider: string;
   caption: string;
   busy: boolean;
   setBusy: (v: boolean) => void;
+  pageId?: string;
 }) {
   return (
     <div
@@ -981,7 +1120,7 @@ function MediaDrop({
           type="file"
           className="sr-only"
           accept={mediaType === "Video" || mediaType === "Reel" ? "video/*,image/*" : "image/*"}
-          multiple={mediaType === "Carousel"}
+          multiple={mediaType === "Carousel" || mediaType === "Photo"}
           onChange={(e) => {
             void ingestFiles(Array.from(e.target.files ?? []), media, setMedia, mediaType);
             e.target.value = "";
@@ -989,7 +1128,7 @@ function MediaDrop({
         />
       </Label>
       <p className="mt-1 text-[12px] text-muted-foreground">
-        Local files upload to Graph as multipart (photos/videos) or rupload (Reels/Stories). Public https URLs also work. Reels: 9:16, 3–60s, min 540×960. Max 6MB per file in Composer (bigger files: paste a public https URL as the Link).
+        Local files upload to Graph as multipart (photos/videos) or rupload (Reels/Stories). Public https URLs also work. Reels: 9:16, 3–90s, min 540×960, 30 API posts / 24h. Max 6MB per file in Composer (bigger files: paste a public https URL as the Link).
       </p>
       {mediaType === "Photo" || mediaType === "Carousel" ? (
         <div className="mt-3 flex flex-wrap items-end gap-2">
@@ -1015,7 +1154,7 @@ function MediaDrop({
                   return;
                 }
                 setBusy(true);
-                void imaginePhotoFn({ data: { prompt, provider: imageProvider } })
+                void imaginePhotoFn({ data: { prompt, provider: imageProvider, pageId } })
                   .then((r) => {
                     if ("error" in r) {
                       toast.error(r.error);
@@ -1040,6 +1179,13 @@ function MediaDrop({
               Generate image
             </Button>
           </Hint>
+        </div>
+      ) : null}
+      {mediaType === "Photo" && media.length > 1 ? (
+        <div className="mt-3">
+          <Button type="button" size="sm" variant="outline" onClick={() => setMediaType("Carousel")}>
+            Switch to Carousel
+          </Button>
         </div>
       ) : null}
       <ul className="mt-3 space-y-2">
@@ -1079,7 +1225,7 @@ async function ingestFiles(
   setMedia: (m: MediaFile[]) => void,
   mediaType: MediaKind,
 ) {
-  const next = mediaType === "Carousel" ? [...current] : [];
+  const next = mediaType === "Carousel" || mediaType === "Photo" ? [...current] : [];
   for (const file of files) {
     if (file.size > 6_000_000) {
       toast.error(`${file.name} is over 6MB. Compress it, or paste a public https URL as the Link for Graph to fetch.`);
@@ -1104,6 +1250,9 @@ async function ingestFiles(
       altText: "",
       createdWithAi: false,
     });
+  }
+  if (mediaType === "Photo" && next.length > 1) {
+    toast.error(`Photo mode posts one image. You attached ${next.length}. Switch to Carousel to post them all.`);
   }
   setMedia(next);
 }

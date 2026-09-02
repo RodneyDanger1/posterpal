@@ -1,4 +1,4 @@
-import { createFileRoute, useLocation } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Guard } from "@/components/guard";
@@ -10,11 +10,23 @@ import { Textarea } from "@/components/ui/textarea";
 import { inGoldenHour, isBuyingIntent } from "@/lib/posterpal/operator";
 import { commentsFn, generateReplyDraftsFn, hideCommentFn, markCommentHandledFn, sendReplyFn, snippetsFn, syncNowFn } from "@/lib/posterpal/fns";
 import type { CommentRow, SnippetRow } from "@/lib/posterpal/types";
-import { useShellStore } from "@/lib/store";
+import { useAgentBriefStore, useShellStore } from "@/lib/store";
 import { relativeTime, copyText } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
 
-export const Route = createFileRoute("/inbox")({ component: () => <Guard><Inbox /></Guard> });
+export const Route = createFileRoute("/inbox")({
+  validateSearch: (s: Record<string, unknown>): { comment?: string; page?: string } => {
+    const out: { comment?: string; page?: string } = {};
+    if (typeof s.comment === "string" && s.comment) out.comment = s.comment;
+    if (typeof s.page === "string" && s.page) out.page = s.page;
+    return out;
+  },
+  component: () => (
+    <Guard>
+      <Inbox />
+    </Guard>
+  ),
+});
 
 function draftsOf(c: CommentRow): string[] {
   try {
@@ -26,7 +38,8 @@ function draftsOf(c: CommentRow): string[] {
 }
 
 function Inbox() {
-  const location = useLocation();
+  const search = Route.useSearch();
+  const navigate = useNavigate();
   const pageId = useShellStore((s) => s.selectedPageId) ?? undefined;
   const setSelectedPageId = useShellStore((s) => s.setSelectedPageId);
   const [filter, setFilter] = useState<"needs" | "hidden" | "all" | "intent">("needs");
@@ -39,15 +52,18 @@ function Inbox() {
   const [snippets, setSnippets] = useState<SnippetRow[]>([]);
   const [sending, setSending] = useState(false);
 
+  useEffect(() => {
+    if (search.page) setSelectedPageId(search.page);
+  }, [search.page, setSelectedPageId]);
+
   const load = () => {
     const serverFilter = filter === "intent" ? "all" : filter;
-    void commentsFn({ data: { filter: serverFilter, pageId } })
+    const loadPageId = search.page || pageId;
+    void commentsFn({ data: { filter: serverFilter, pageId: loadPageId } })
       .then((list) => {
       const next = filter === "intent" ? list.filter((c) => isBuyingIntent(c.message)) : list;
       setRows(next);
-      // Deep link from Needs you: ?comment=<id>&page=<pageId> selects that exact comment.
-      const params = new URLSearchParams(location.search);
-      const targetId = params.get("comment");
+      const targetId = search.comment;
       if (targetId) {
         const target = next.find((c) => c.id === targetId) ?? null;
         if (target) {
@@ -56,18 +72,13 @@ function Inbox() {
         } else {
           setActive((cur) => next.find((c) => c.id === cur?.id) ?? next[0] ?? null);
         }
-        const clean = new URLSearchParams(params);
-        clean.delete("comment");
-        clean.delete("page");
-        const qs = clean.toString();
-        window.history.replaceState(null, "", qs ? `?${qs}` : location.pathname);
       } else {
         setActive((cur) => next.find((c) => c.id === cur?.id) ?? next[0] ?? null);
       }
     })
       .catch((e: unknown) => toast.error(e instanceof Error ? e.message : "Could not load inbox"));
   };
-  useEffect(load, [filter, pageId]);
+  useEffect(load, [filter, pageId, search.comment, search.page]);
 
   useEffect(() => {
     void snippetsFn({ data: { pageId } })
@@ -127,6 +138,7 @@ function Inbox() {
         <div className="flex flex-wrap items-start justify-between gap-2">
           <PageHeader
             title="Inbox"
+            line="Buying-intent tab is local — price, shop, size, order. You still click Send."
             hint="AI may draft replies. A human must click Send. PosterPal never auto-likes, auto-follows, or auto-posts comments. j/k moves the list. e marks handled without a Graph reply."
           />
           <Button
@@ -151,7 +163,9 @@ function Inbox() {
         <Tabs value={filter} onValueChange={(v) => setFilter(v as typeof filter)}>
           <TabsList>
             <TabsTrigger value="needs" title="Comments that still need a human reply">Needs reply</TabsTrigger>
-            <TabsTrigger value="intent" title="Local filter for price, shop, size, and order questions">Buying intent</TabsTrigger>
+            <TabsTrigger value="intent" title="Local filter for price, shop, size, and order questions" className="min-h-11">
+              Buying intent
+            </TabsTrigger>
             <TabsTrigger value="hidden" title="Comments you hid on Graph (is_hidden=true)">Hidden</TabsTrigger>
             <TabsTrigger value="all" title="Every imported comment for the selected Page">All</TabsTrigger>
           </TabsList>
@@ -230,7 +244,7 @@ function Inbox() {
                   <button
                     key={sn.id}
                     type="button"
-                    className="rounded-full border border-border px-3 py-1 text-[12px] hover:bg-muted"
+                    className="min-h-11 rounded-full border border-border px-3 py-2 text-[13px] hover:bg-muted"
                     title="Insert this saved reply. You still click Send."
                     onClick={() => setDraft(sn.body)}
                   >
@@ -286,7 +300,10 @@ function Inbox() {
                 variant="outline"
                 onClick={() => {
                   void hideCommentFn({ data: { commentId: active.id, hidden: !active.is_hidden } })
-                    .then(load)
+                    .then(() => {
+                      toast.success(active.is_hidden ? "Unhid comment on Facebook." : "Comment hidden on Facebook.");
+                      load();
+                    })
                     .catch((e: unknown) => toast.error(e instanceof Error ? e.message : "Hide failed"));
                 }}
               >
@@ -314,6 +331,19 @@ function Inbox() {
                 }}
               >
                 Copy
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => {
+                  if (active.page_id) useShellStore.getState().setSelectedPageId(active.page_id);
+                  useAgentBriefStore.getState().queue(
+                    `Draft inbox replies for this comment from ${active.author_name ?? "Visitor"} on ${active.page_name ?? "this Page"}: “${active.message.slice(0, 280)}”. Buying-intent first. A human still clicks Send.`,
+                    "inbox",
+                  );
+                  void navigate({ to: "/agent" });
+                }}
+              >
+                Ask agent
               </Button>
             </div>
           </div>

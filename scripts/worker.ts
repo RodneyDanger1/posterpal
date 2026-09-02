@@ -3,15 +3,16 @@
  * PosterPal background worker — keeps the desk alive when no browser tab is open.
  *
  * Every 60s (or once with --once):
- *   1. tickScheduler(userId)      — fire due LocalScheduled posts, fail stuck Publishing rows
- *   2. syncFromGraph(userId)      — pull published posts, comments, insights from Graph
- *   3. refreshVaultTokens(userId) — extend long-lived tokens before they go stale
+ *   1. tickScheduler(userId)      — fire due LocalScheduled, fail stuck Publishing
+ *   2. recycleDuePosts(userId)    — HITL LocalDraft remix copies
+ *   3. ops.rssDrafts(userId)      — HITL LocalDrafts from page RSS feeds
+ *   4. syncFromGraph(userId)      — published posts, comments, insights
+ *   5. refreshVaultTokens(userId) — extend long-lived tokens
  *
- * Requires DATABASE_URL (shared Postgres). The PGLite fallback is in-process —
- * a separate worker process cannot see the web process's PGLite, so the worker
- * refuses to start without DATABASE_URL. Run with: npm run worker
- *
- * Phase 1 (§7) of Surpass.md: "A desk that runs when the browser is closed."
+ * With DATABASE_URL: runs those jobs in-process against Postgres.
+ * Without DATABASE_URL: HTTP POSTs /api/tick on the local desk (PGLite lives
+ * in the web process; this worker cannot see it). The desk must be up.
+ * Run with: npm run worker
  */
 import { getSql } from "../src/lib/db";
 import { recycleDuePosts, tickScheduler } from "../src/lib/posterpal/publish";
@@ -72,33 +73,61 @@ async function oneTick(operatorId: string): Promise<void> {
     results.push(`vault:FAILED(${e instanceof Error ? e.message : String(e)})`);
   }
   console.log(`[worker] ${new Date().toISOString()} ${results.join(" | ")} (${Date.now() - started}ms)`);
+  const { deskLog, stampTick } = await import("../src/lib/posterpal/log");
+  await stampTick(operatorId, "worker_last_tick");
+  const failed = results.filter((r) => r.includes("FAILED"));
+  const notable = results.filter((r) => !/^vault:ok$/.test(r) && !/^tick:0$/.test(r));
+  if (failed.length || notable.length) {
+    await deskLog({
+      level: failed.length ? "error" : "info",
+      scope: "worker",
+      userId: operatorId,
+      message: (failed.length ? failed : notable).join(" | "),
+    });
+  }
+}
+
+async function httpTick(): Promise<void> {
+  const port = Number(process.env.PORT || process.env.NITRO_PORT || 8080);
+  const url = `http://127.0.0.1:${port}/api/tick`;
+  try {
+    const res = await fetch(url, { method: "POST" });
+    const text = await res.text();
+    const line = `[worker:http] ${new Date().toISOString()} ${url} -> ${res.status} ${text.slice(0, 180)}`;
+    if (!res.ok) console.warn(line);
+    else console.log(line);
+  } catch (e) {
+    console.warn(`[worker:http] ${new Date().toISOString()} ${url} failed:`, e instanceof Error ? e.message : e);
+  }
 }
 
 async function main(): Promise<void> {
   const databaseUrl = process.env.DATABASE_URL?.trim();
-  if (!databaseUrl) {
-    console.error(
-      "[worker] DATABASE_URL is not set. The worker needs the shared Postgres the web app also uses — " +
-        "PGLite lives inside the web process and a second process cannot see it. " +
-        "Set DATABASE_URL (and run migrations) before starting the worker.",
-    );
-    process.exit(1);
+  const isPglite = !databaseUrl;
+  if (isPglite) {
+    console.log("[worker] DATABASE_URL not set — running HTTP ticker against local desk /api/tick (PGLite mode)");
   }
 
-  const operatorId = await resolveOperatorId();
-  console.log(`[worker] starting — operator ${operatorId}, interval ${INTERVAL_MS}ms${ONCE ? " (once)" : ""}`);
+  const runTick = async () => {
+    if (isPglite) {
+      await httpTick();
+    } else {
+      const operatorId = await resolveOperatorId();
+      await oneTick(operatorId);
+    }
+  };
+
+  console.log(`[worker] starting — interval ${INTERVAL_MS}ms${ONCE ? " (once)" : ""}`);
 
   if (ONCE) {
-    await oneTick(operatorId);
+    await runTick();
     process.exit(0);
   }
 
-  // Run one tick immediately, then on the interval.
-  await oneTick(operatorId);
+  await runTick();
   const timer = setInterval(() => {
-    void oneTick(operatorId);
+    void runTick();
   }, INTERVAL_MS);
-  timer.unref?.();
 
   const shutdown = (signal: string) => {
     console.log(`[worker] ${signal} — stopping.`);
@@ -106,6 +135,13 @@ async function main(): Promise<void> {
     process.exit(0);
   };
   process.on("SIGINT", () => shutdown("SIGINT"));
+  process.on("unhandledRejection", (reason) => {
+    console.error("[worker] unhandledRejection", reason instanceof Error ? reason.message : reason);
+  });
+  process.on("uncaughtException", (err) => {
+    console.error("[worker] uncaughtException", err.message);
+    process.exit(1);
+  });
   process.on("SIGTERM", () => shutdown("SIGTERM"));
 }
 

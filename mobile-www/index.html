@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>PosterPal</title>
+    <style>
+      :root { color-scheme: light; }
+      body { font-family: "Segoe UI", system-ui, sans-serif; margin: 0; min-height: 100dvh; background: #F0F2F5; color: #050505; display: grid; place-items: center; padding: 24px; }
+      .card { width: min(420px, 100%); background: #ffffff; border-radius: 12px; padding: 24px; box-shadow: 0 1px 2px rgb(0 0 0 / 0.06), 0 0 0 1px rgb(0 0 0 / 0.03); }
+      h1 { margin: 0 0 8px; font-size: 22px; }
+      p { margin: 0 0 16px; color: #65676b; font-size: 14px; line-height: 1.45; }
+      label { display: block; font-size: 12px; font-weight: 600; margin-bottom: 6px; }
+      input { width: 100%; box-sizing: border-box; border: 1px solid #ccd0d5; background: #fff; color: inherit; border-radius: 8px; padding: 12px; font-size: 16px; min-height: 44px; }
+      button { margin-top: 14px; width: 100%; border: 0; border-radius: 8px; padding: 12px; font-weight: 700; background: #1877F2; color: #fff; font-size: 16px; min-height: 44px; }
+      button.ghost { background: transparent; color: #65676b; font-weight: 600; margin-top: 8px; }
+      .err { color: #e41e3f; font-size: 13px; min-height: 1.2em; }
+      code { background: #F0F2F5; padding: 2px 6px; border-radius: 4px; }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <h1>PosterPal</h1>
+      <p>
+        This APK does not talk to Facebook itself. It opens the desk running on your PC
+        (Windows app). Same Pages, drafts, and inbox. Keep PosterPal open on the PC.
+      </p>
+      <label for="url">Desk URL from the PC (Settings → Phone)</label>
+      <input id="url" inputmode="url" placeholder="http://192.168.1.20:8080" autocomplete="url" />
+      <div class="err" id="err"></div>
+      <button type="button" id="go">Open desk</button>
+      <button type="button" class="ghost" id="forget">Use a different PC</button>
+    </div>
+    <script>
+      const KEY = "posterpal-desk-url";
+      const SKIP = "posterpal-skip-auto";
+      const input = document.getElementById("url");
+      const err = document.getElementById("err");
+      const params = new URLSearchParams(location.search);
+      if (params.get("change") === "1") {
+        try { sessionStorage.setItem(SKIP, "1"); localStorage.removeItem(KEY); } catch (e) {}
+      }
+      try { input.value = localStorage.getItem(KEY) || ""; } catch (e) {}
+
+      function normalize(raw) {
+        let v = (raw || "").trim();
+        if (!v) return null;
+        if (!/^https?:\/\//i.test(v)) v = "http://" + v;
+        const u = new URL(v);
+        if (u.protocol !== "http:" && u.protocol !== "https:") throw new Error("Use http:// or https://");
+        if (u.hostname === "127.0.0.1" || u.hostname === "localhost") {
+          throw new Error("127.0.0.1 on this phone is the phone itself. Paste the PC’s Wi‑Fi URL from Settings → Phone.");
+        }
+        return u.origin;
+      }
+
+      async function openDesk(origin, persist) {
+        err.textContent = "Reaching the PC…";
+        const ctrl = new AbortController();
+        const t = setTimeout(() => ctrl.abort(), 4000);
+        try {
+          const res = await fetch(origin + "/api/health", { cache: "no-store", signal: ctrl.signal });
+          if (!res.ok) throw new Error("Desk answered HTTP " + res.status);
+        } catch (e) {
+          clearTimeout(t);
+          err.textContent =
+            "Cannot reach " + origin + ". Same Wi‑Fi? PosterPal still open on the PC? Windows Firewall allowing port 8080?";
+          return false;
+        }
+        clearTimeout(t);
+        if (persist) {
+          try { localStorage.setItem(KEY, origin); sessionStorage.removeItem(SKIP); } catch (e) {}
+        }
+        window.location.href = origin + "/";
+        return true;
+      }
+
+      document.getElementById("go").onclick = function () {
+        err.textContent = "";
+        let origin;
+        try { origin = normalize(input.value); } catch (e) { err.textContent = e.message || "That is not a URL."; return; }
+        if (!origin) { err.textContent = "Paste the URL shown on the PC."; return; }
+        void openDesk(origin, true);
+      };
+
+      document.getElementById("forget").onclick = function () {
+        try { localStorage.removeItem(KEY); sessionStorage.setItem(SKIP, "1"); } catch (e) {}
+        input.value = "";
+        err.textContent = "Saved PC cleared. Paste a new URL.";
+      };
+
+      (function auto() {
+        try {
+          if (sessionStorage.getItem(SKIP) === "1") return;
+          const saved = localStorage.getItem(KEY);
+          if (!saved) return;
+          input.value = saved;
+          void openDesk(saved, false);
+        } catch (e) {}
+      })();
+    </script>
+  </body>
+</html>

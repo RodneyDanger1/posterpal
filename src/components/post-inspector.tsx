@@ -8,13 +8,17 @@ import { PageAvatar } from "@/components/page-avatar";
 import {
   cancelPostFn,
   clonePostFn,
+  deletePublishedFn,
+  duplicateNextWeekFn,
   getPostBundle,
   listPagesFn,
   publishNowFn,
+  restoreCancelledFn,
 } from "@/lib/posterpal/fns";
+import { facebookPermalink, isRemixDraft } from "@/lib/posterpal/briefing";
 import { publishToast, toLocalInput } from "@/lib/posterpal/operator";
 import type { CommentRow, ContentItemRow, PageRow, PostRow } from "@/lib/posterpal/types";
-import { useInspectorStore, useShellStore } from "@/lib/store";
+import { useAgentBriefStore, useInspectorStore, useShellStore } from "@/lib/store";
 import { copyText, relativeTime } from "@/lib/utils";
 
 export function PostInspector() {
@@ -72,7 +76,12 @@ export function PostInspector() {
           <div className="mt-4 space-y-4">
             <div className="flex items-start justify-between gap-3">
               <div className="flex min-w-0 items-start gap-2">
-                <PageAvatar id={post.page_id} name={post.page_name ?? "Page"} size={36} />
+                <PageAvatar
+                  id={post.page_id}
+                  name={post.page_name ?? "Page"}
+                  pictureUrl={pages.find((p) => p.id === post.page_id)?.picture_url}
+                  size={36}
+                />
                 <div className="min-w-0">
                   <div className="font-semibold">{post.page_name}</div>
                   <div className="text-[12px] text-muted-foreground">
@@ -83,6 +92,11 @@ export function PostInspector() {
               <StatusBadge status={post.status} />
             </div>
             <p className="whitespace-pre-wrap text-[15px]">{post.message || "(no caption)"}</p>
+            {isRemixDraft(post.message) ? (
+              <p className="rounded-md bg-warning/20 px-3 py-2 text-[13px]">
+                Rewrite this caption in this Page&apos;s voice before sending. Policy blocks the marker text from going live.
+              </p>
+            ) : null}
             {post.link ? (
               <a href={post.link} className="block truncate text-[13px] text-primary hover:underline" target="_blank" rel="noreferrer">
                 {post.link}
@@ -125,11 +139,88 @@ export function PostInspector() {
               </div>
             ) : null}
 
+            {post.status === "Cancelled" ? (
+              <Button
+                size="sm"
+                disabled={busy}
+                onClick={() => {
+                  setBusy(true);
+                  void restoreCancelledFn({ data: { postId: post.id } })
+                    .then(() => {
+                      toast.success("Restored as a local draft.");
+                      closeInspector();
+                      void navigate({ to: "/drafts" });
+                    })
+                    .catch((e: unknown) => toast.error(e instanceof Error ? e.message : "Could not restore"))
+                    .finally(() => setBusy(false));
+                }}
+              >
+                Restore draft
+              </Button>
+            ) : null}
+            {post.status === "Published" || post.status === "LocalScheduled" || post.status === "FacebookScheduled" ? (
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={busy}
+                onClick={() => {
+                  setBusy(true);
+                  void duplicateNextWeekFn({ data: { postId: post.id } })
+                    .then((r) => {
+                      toast.success(`Queued for next week. ${r.warning ?? ""}`);
+                      closeInspector();
+                      void navigate({ to: "/drafts" });
+                    })
+                    .catch((e: unknown) => toast.error(e instanceof Error ? e.message : "Could not duplicate"))
+                    .finally(() => setBusy(false));
+                }}
+              >
+                Duplicate next week
+              </Button>
+            ) : null}
+            {post.status === "Published" ? (
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={busy}
+                onClick={() => {
+                  setBusy(true);
+                  void clonePostFn({ data: { postId: post.id, pageIds: [post.page_id], mode: "local-draft" } })
+                    .then((r) => {
+                      toast.success(`Remix draft saved. ${r.warning ?? "Rewrite before sending."}`);
+                      closeInspector();
+                      void navigate({ to: "/drafts" });
+                    })
+                    .catch((e: unknown) => toast.error(e instanceof Error ? e.message : "Could not reshare"))
+                    .finally(() => setBusy(false));
+                }}
+              >
+                Reshare as remix draft
+              </Button>
+            ) : null}
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => {
+                if (post.page_id) setPage(post.page_id);
+                useAgentBriefStore.getState().queue(
+                  post.status === "Failed"
+                    ? `Fix failed publish on ${post.page_name ?? "this Page"}: ${post.error_message ?? "unknown error"}. Rewrite: “${(post.message ?? "").slice(0, 280)}”. Do not publish.`
+                    : `Rewrite this caption in this Page's voice: “${(post.message ?? "").slice(0, 280)}”. Do not publish.`,
+                  post.status === "Failed" ? "rewrite" : "research",
+                );
+                closeInspector();
+                void navigate({ to: "/agent" });
+              }}
+            >
+              Ask agent
+            </Button>
+
             {otherPages.length > 0 ? (
               <div>
                 <h3 className="text-[13px] font-semibold">Clone to other Pages</h3>
                 <p className="mt-1 text-[12px] text-muted-foreground">
-                  Creates a local draft on each selected Page. Nothing is posted until you click Publish.
+                  Creates a rewrite-marked local draft on each selected Page. Nothing is posted until you click Publish.
                 </p>
                 <div className="mt-2 flex flex-wrap gap-2">
                   {otherPages.map((p) => {
@@ -222,7 +313,10 @@ export function PostInspector() {
                   onClick={() => {
                     setPage(post.page_id);
                     closeInspector();
-                    void navigate({ to: "/inbox" });
+                    void navigate({
+                      to: "/inbox",
+                      search: { comment: comments.find((c) => c.needs_reply)?.id, page: post.page_id },
+                    });
                   }}
                 >
                   Open inbox
@@ -239,6 +333,33 @@ export function PostInspector() {
               >
                 Copy caption
               </Button>
+              {facebookPermalink(post.facebook_post_id) ? (
+                <Button size="sm" variant="outline" asChild>
+                  <a href={facebookPermalink(post.facebook_post_id)!} target="_blank" rel="noreferrer">
+                    Open on Facebook
+                  </a>
+                </Button>
+              ) : null}
+              {post.status === "Published" && post.created_by_this_app ? (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={busy}
+                  onClick={() => {
+                    if (!window.confirm("Delete this post on Facebook? Only posts this desk created can be removed here.")) return;
+                    setBusy(true);
+                    void deletePublishedFn({ data: { postId: post.id } })
+                      .then(() => {
+                        toast.success("Deleted on Facebook and marked Cancelled here.");
+                        closeInspector();
+                      })
+                      .catch((e: unknown) => toast.error(e instanceof Error ? e.message : "Delete failed"))
+                      .finally(() => setBusy(false));
+                  }}
+                >
+                  Delete on Facebook
+                </Button>
+              ) : null}
               {post.status !== "Published" && post.status !== "Cancelled" ? (
                 <Button
                   size="sm"

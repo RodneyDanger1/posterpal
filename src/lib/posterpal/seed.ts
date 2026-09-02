@@ -9,6 +9,7 @@ export async function seedPracticeWorkspace(userId: string): Promise<void> {
     select count(*)::int as n from pages where user_id = ${userId}
   `;
   if (Number(existing[0]?.n ?? 0) > 0) {
+    await expandPracticeFleet(userId);
     await ensureMemory(userId);
     return;
   }
@@ -268,6 +269,86 @@ export async function seedPracticeWorkspace(userId: string): Promise<void> {
       (${randomUUID()}, ${userId}, ${nsb}, ${"Hours block"}, ${"Open 10–6 Tuesday through Saturday, noon–4 Sunday. Closed Monday."}),
       (${randomUUID()}, ${userId}, ${nsb}, ${"Staff pick closer"}, ${"Ask Maya at the desk — she will put it in your hands."})
   `;
+
+  await setSetting(userId, "default_page_id", nsb, false);
+  await expandPracticeFleet(userId);
+}
+
+const FLEET_STARTERS: Record<string, string> = {
+  "Sugar Loaf Ceramics":
+    "Open-studio Saturday 10–2. The river glaze just came out of the kiln — a few mugs, no two alike. Seconds table by the door.",
+  "Mississippi Merch Co":
+    "Bluff line tee is back in S–XL. Heavy cotton, water-based print, no bookstore slogan on the chest. Shop link in the first comment. #ad",
+  "Bluffside Coffee":
+    "Ethiopia natural on bar this week. Window seats free before 8. Cardamom bun sold out yesterday by 9 — we baked extra.",
+  "Prairie Ticket Desk":
+    "Doors 7, music 8, all-ages. Thursday's two-band bill still has floor tickets. Cash or card at the door.",
+  "Levee Dog Walks":
+    "North levee at 7am tomorrow if the wind stays under 15. Six-dog cap. Text us if your pup is new to the pack.",
+  "Riverlight Press":
+    "One-color poster jobs back in 5 days on French paper. Zine #12 is on the counter — $8, no shipping this week.",
+  "Driftless Kitchen":
+    "Thursday kit: pork, squash, and a cider pan sauce. Pickup 4–6 at the side door. Allergen card is on the menu.",
+  "Garvin Heights Guides":
+    "Saturday 9am overlook walk. Boots, not sneakers. Weather call Friday at 6. Eight spots, start at the upper lot.",
+};
+
+/** Fill the practice desk out to 10 unique Pages. Never runs once a live
+ *  Facebook Page exists — we will not mix practice rows into a real vault. */
+export async function expandPracticeFleet(userId: string): Promise<number> {
+  const { PRACTICE_FLEET } = await import("./fleet");
+  const sql = await getSql();
+  const live = await sql<{ n: number }>`
+    select count(*)::int as n from pages where user_id = ${userId} and is_practice = false
+  `;
+  if (Number(live[0]?.n ?? 0) > 0) return 0;
+
+  const existing = await sql<{ name: string }>`
+    select name from pages where user_id = ${userId}
+  `;
+  const have = new Set(existing.map((r) => r.name));
+  let added = 0;
+  const hoursAgo = (h: number) => new Date(Date.now() - h * 3600_000).toISOString();
+
+  for (const ident of PRACTICE_FLEET) {
+    if (have.has(ident.name)) continue;
+    const id = randomUUID();
+    await sql`
+      insert into pages (
+        id, user_id, facebook_page_id, name, category, fan_count, tasks_json,
+        is_active, is_read_only, is_practice, brand_voice, cadence_warn_per_24h, cadence_block_per_24h
+      ) values (
+        ${id}, ${userId}, null, ${ident.name}, ${ident.category}, ${ident.fans},
+        ${JSON.stringify(["ANALYZE", "CREATE_CONTENT", "MODERATE"])},
+        true, false, true, ${ident.voice}, ${ident.cadenceWarn}, ${ident.cadenceBlock}
+      )
+    `;
+    const starter = FLEET_STARTERS[ident.name];
+    if (starter) {
+      const postId = randomUUID();
+      await sql`
+        insert into posts (
+          id, user_id, page_id, message, media_type, status, published_time,
+          created_by_this_app, reactions_count, comments_count, shares_count, created_at, updated_at
+        ) values (
+          ${postId}, ${userId}, ${id}, ${starter}, 'Text', 'Published', ${hoursAgo(18)},
+          true, 12, 2, 1, ${hoursAgo(18)}, now()
+        )
+      `;
+    }
+    if (ident.merch) {
+      await sql`
+        insert into merchandise_links (id, user_id, page_id, title, url, platform, utm_template, cta_override)
+        values (
+          ${randomUUID()}, ${userId}, ${id}, ${ident.merch.title}, ${ident.merch.url},
+          ${ident.merch.platform}, ${"utm_source=facebook&utm_medium=page&utm_campaign={slug}"}, ${ident.merch.cta}
+        )
+      `;
+    }
+    have.add(ident.name);
+    added += 1;
+  }
+  return added;
 }
 
 export async function ensureMemory(userId: string) {
@@ -293,6 +374,7 @@ export async function ensureMemory(userId: string) {
       (${randomUUID()}, ${userId}, ${a}, ${"River rug photo"}, ${"Need a photo of Saturday story hour — kids on the river rug, cider for grown-ups, no faces in the foreground if we can help it."}, ${"Photo"}),
       (${randomUUID()}, ${userId}, ${b}, ${"Thursday bands"}, ${"Two local bands at the winery. Doors 7, music 8. Cash or card. Dogs on the lawn side."}, ${"Text"})
   `;
+  await setSetting(userId, "memory_seeded_once", "1", false);
   const snips = await sql<{ n: number }>`select count(*)::int as n from caption_snippets where user_id = ${userId}`;
   if (Number(snips[0]?.n ?? 0) > 0) return;
   await sql`

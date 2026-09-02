@@ -3,12 +3,12 @@ import { useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import type { PageRow } from "@/lib/posterpal/types";
 import { nextGoodSlot } from "@/lib/posterpal/desk";
-import { useInspectorStore, useShellStore } from "@/lib/store";
+import { useAgentBriefStore, useInspectorStore, useShellStore } from "@/lib/store";
 
 type SearchResult = {
   pages: { id: string; name: string }[];
   posts: { id: string; message: string | null; status: string }[];
-  comments: { id: string; message: string; author_name: string | null }[];
+  comments: { id: string; message: string; author_name: string | null; page_id?: string | null }[];
 };
 
 export function CommandPalette({
@@ -75,6 +75,7 @@ export function CommandPalette({
               ["/merchandise", "Merchandise"],
               ["/vault", "Token vault"],
               ["/pair", "Pair a phone"],
+              ["/connect", "Connect Facebook"],
               ["/settings", "Settings"],
             ].map(([path, label]) => (
               <Command.Item
@@ -95,6 +96,138 @@ export function CommandPalette({
               className="flex cursor-pointer items-center rounded-md px-3 py-2 text-sm text-foreground aria-selected:bg-muted"
             >
               Schedule at next good slot
+            </Command.Item>
+            <Command.Item
+              value="go new photo post"
+              onSelect={() => {
+                setPrefill({ message: "", mediaType: "Photo" });
+                go("/composer");
+              }}
+              className="flex cursor-pointer items-center rounded-md px-3 py-2 text-sm text-foreground aria-selected:bg-muted"
+            >
+              New photo post
+            </Command.Item>
+            <Command.Item
+              value="go pair phone apk"
+              onSelect={() => go("/pair")}
+              className="flex cursor-pointer items-center rounded-md px-3 py-2 text-sm text-foreground aria-selected:bg-muted"
+            >
+              Phone / APK pairing
+            </Command.Item>
+            <Command.Item
+              value="go buying intent inbox"
+              onSelect={() => {
+                setOpen(false);
+                void navigate({ to: "/inbox" });
+              }}
+              className="flex cursor-pointer items-center rounded-md px-3 py-2 text-sm text-foreground aria-selected:bg-muted"
+            >
+              Inbox — buying intent
+            </Command.Item>
+            <Command.Item
+              value="fix failed publishes desk agent rewrite"
+              onSelect={() => {
+                useAgentBriefStore.getState().queue(
+                  "Fix failed publishes on this desk. Rewrite each failed caption. Do not publish.",
+                  "rewrite",
+                );
+                go("/agent");
+              }}
+              className="flex cursor-pointer items-center rounded-md px-3 py-2 text-sm text-foreground aria-selected:bg-muted"
+            >
+              Fix failed publishes (Agent)
+            </Command.Item>
+            <Command.Item
+              value="draft inbox replies desk agent"
+              onSelect={() => {
+                useAgentBriefStore.getState().queue(
+                  "Draft inbox replies for waiting comments. Buying-intent first. A human still clicks Send.",
+                  "inbox",
+                );
+                go("/agent");
+              }}
+              className="flex cursor-pointer items-center rounded-md px-3 py-2 text-sm text-foreground aria-selected:bg-muted"
+            >
+              Draft inbox replies (Agent)
+            </Command.Item>
+            <Command.Item
+              value="what's happening desk agent ops"
+              onSelect={() => {
+                useAgentBriefStore.getState().queue(
+                  "What's happening on this desk? Using DESK OPS, summarize queue, fails, inbox, vault, and ticker. Do not invent Graph calls.",
+                  "ops",
+                );
+                go("/agent");
+              }}
+              className="flex cursor-pointer items-center rounded-md px-3 py-2 text-sm text-foreground aria-selected:bg-muted"
+            >
+              What’s happening (Agent)
+            </Command.Item>
+            <Command.Item
+              value="plan week slots desk agent calendar"
+              onSelect={() => {
+                useAgentBriefStore.getState().queue(
+                  "Plan this week's posting slots using DESK OPS. Flag overdue LocalScheduled and cadence. Do not publish.",
+                  "calendar",
+                );
+                go("/agent");
+              }}
+              className="flex cursor-pointer items-center rounded-md px-3 py-2 text-sm text-foreground aria-selected:bg-muted"
+            >
+              Plan this week (Agent)
+            </Command.Item>
+            <Command.Item
+              value="connect meta facebook app id desk agent"
+              onSelect={() => {
+                useAgentBriefStore.getState().queue(
+                  "Help me connect this desk to my Meta developer app. Graph v26.0 only. Explain App ID, Redirect URI, Development Mode, and Facebook Login. Do not invent a secret. Do not complete Login for me.",
+                  "connect",
+                );
+                go("/agent");
+              }}
+              className="flex cursor-pointer items-center rounded-md px-3 py-2 text-sm text-foreground aria-selected:bg-muted"
+            >
+              Connect Meta app (Agent)
+            </Command.Item>
+            <Command.Item
+              value="recall later ideas desk agent memory"
+              onSelect={() => {
+                useAgentBriefStore.getState().queue(
+                  "Recall parked Later ideas and recent Agent runs. Turn the best one into three captions. Do not publish.",
+                  "memory",
+                );
+                go("/agent");
+              }}
+              className="flex cursor-pointer items-center rounded-md px-3 py-2 text-sm text-foreground aria-selected:bg-muted"
+            >
+              Recall Later (Agent)
+            </Command.Item>
+            <Command.Item
+              value="restock merch caption desk agent shop"
+              onSelect={() => {
+                useAgentBriefStore.getState().queue(
+                  "Write a restock caption in this Page’s voice with the merch CTA. Facts only. Add a place for #ad.",
+                  "shop",
+                );
+                go("/agent");
+              }}
+              className="flex cursor-pointer items-center rounded-md px-3 py-2 text-sm text-foreground aria-selected:bg-muted"
+            >
+              Restock caption (Agent)
+            </Command.Item>
+            <Command.Item
+              value="go failed drafts retry"
+              onSelect={() => go("/drafts")}
+              className="flex cursor-pointer items-center rounded-md px-3 py-2 text-sm text-foreground aria-selected:bg-muted"
+            >
+              Failed publishes
+            </Command.Item>
+            <Command.Item
+              value="go unique pages identity"
+              onSelect={() => go("/")}
+              className="flex cursor-pointer items-center rounded-md px-3 py-2 text-sm text-foreground aria-selected:bg-muted"
+            >
+              Fleet identity planner
             </Command.Item>
           </Command.Group>
           {pages.length > 0 ? (
@@ -137,7 +270,13 @@ export function CommandPalette({
                 <Command.Item
                   key={c.id}
                   value={`comment ${c.author_name ?? ""} ${c.message}`}
-                  onSelect={() => go("/inbox")}
+                  onSelect={() => {
+                    setOpen(false);
+                    void navigate({
+                      to: "/inbox",
+                      search: { comment: c.id, page: c.page_id ?? undefined },
+                    });
+                  }}
                   className="flex cursor-pointer items-center rounded-md px-3 py-2 text-sm aria-selected:bg-muted"
                 >
                   <span className="truncate">
