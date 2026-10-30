@@ -18,6 +18,8 @@ const ROUTES = [
   "/analytics",
   "/media",
   "/merchandise",
+  "/commerce",
+  "/messenger",
   "/vault",
   "/settings",
   "/connect",
