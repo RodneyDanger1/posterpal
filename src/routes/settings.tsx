@@ -61,6 +61,10 @@ function Settings() {
   const [fal, setFal] = useState("");
   const [textProvider, setTextProvider] = useState("grok");
   const [imageProvider, setImageProvider] = useState("grok");
+  const [customBase, setCustomBase] = useState("");
+  const [customTextModel, setCustomTextModel] = useState("");
+  const [customImageModel, setCustomImageModel] = useState("");
+  const [customKey, setCustomKey] = useState("");
   const [userToken, setUserToken] = useState("");
   const [lan, setLan] = useState<{ loopback: string; lan: string[] } | null>(null);
 
@@ -72,6 +76,9 @@ function Settings() {
       setBlock(s.cadenceBlock);
       setTextProvider(s.defaultTextProvider);
       setImageProvider(s.defaultImageProvider);
+      setCustomBase(s.customBaseUrl ?? "");
+      setCustomTextModel(s.customTextModel ?? "");
+      setCustomImageModel(s.customImageModel ?? "");
       if (!s.timezone) {
         const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
         if (tz) {
@@ -581,6 +588,60 @@ function Settings() {
             </select>
           </div>
         </div>
+        <details className="mt-4 rounded-lg border border-border px-3 py-2">
+          <summary className="cursor-pointer text-[13px] font-semibold">Custom OpenAI-compatible endpoint (free/cheap providers)</summary>
+          <p className="mt-1 text-[12px] text-muted-foreground">
+            For providers you trust — Groq, OpenRouter, Cerebras, Mistral, or a local Ollama/LM Studio
+            (localhost needs <code>POSTERPAL_ALLOW_LOCAL_PROVIDERS=1</code>). PosterPal sends your captions
+            and prompts to whatever URL you enter. HTTPS only; private/loopback/DNS-rebound addresses are
+            refused. Do not paste API keys into third-party “free key” sites or list sites.
+          </p>
+          <div className="mt-2 grid gap-2 sm:grid-cols-2">
+            <div className="space-y-1 sm:col-span-2">
+              <Label>Base URL {settings?.customBaseUrl ? "(saved)" : ""}</Label>
+              <Input
+                value={customBase}
+                onChange={(e) => setCustomBase(e.target.value)}
+                placeholder="https://api.groq.com/openai/v1"
+                autoComplete="off"
+              />
+            </div>
+            <div className="space-y-1">
+              <Label>Text model</Label>
+              <Input value={customTextModel} onChange={(e) => setCustomTextModel(e.target.value)} placeholder="llama-3.3-70b-versatile" autoComplete="off" />
+            </div>
+            <div className="space-y-1">
+              <Label>Image model (optional)</Label>
+              <Input value={customImageModel} onChange={(e) => setCustomImageModel(e.target.value)} placeholder="e.g. flux-schnell" autoComplete="off" />
+            </div>
+            <div className="space-y-1 sm:col-span-2">
+              <Label>API key {settings?.providers.custom ? "(saved)" : ""}</Label>
+              <Input type="password" value={customKey} onChange={(e) => setCustomKey(e.target.value)} placeholder="leave blank to keep saved key" autoComplete="off" />
+            </div>
+          </div>
+          <Button
+            size="sm"
+            className="mt-2"
+            onClick={() => {
+              void saveAiKeysFn({
+                data: {
+                  customBaseUrl: customBase,
+                  customTextModel,
+                  customImageModel,
+                  customKey,
+                },
+              })
+                .then(() => {
+                  toast.success("Custom endpoint saved (URL validated)");
+                  setCustomKey("");
+                  void getSettingsFn().then(setSettings);
+                })
+                .catch((e: unknown) => toast.error(e instanceof Error ? e.message : "Could not save endpoint"));
+            }}
+          >
+            Save custom endpoint
+          </Button>
+        </details>
         <ul className="mt-3 space-y-1 text-[12px] text-muted-foreground">
           {TEXT_PROVIDERS.map((p) => (
             <li key={p.id}>

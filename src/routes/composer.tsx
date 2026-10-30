@@ -9,6 +9,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { MagicWand } from "@/components/magic-wand";
 import { Hint } from "@/components/ui/tooltip";
 import {
   cadenceFn,
@@ -247,6 +248,7 @@ function useComposerState() {
 
 function Composer() {
   const s = useComposerState();
+  const composerPageId = useShellStore((st) => st.selectedPageId) ?? undefined;
   const stats = captionStats(s.message);
   const tags = countHashtags(s.message);
   const reuse = s.library.filter((r) => typeof r.data_url === "string" && r.data_url).slice(0, 6);
@@ -429,6 +431,12 @@ function Composer() {
             placeholder="Write the caption…"
             className="min-h-40 text-[15px]"
           />
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <MagicWand kind="caption" value={s.message} onChange={s.setMessage} pageId={composerPageId} />
+            <span className="text-[11px] text-muted-foreground">
+              Style + locks apply to the wand and to model variants. A human still edits and sends.
+            </span>
+          </div>
           <div className="flex flex-wrap items-center justify-between gap-2 text-[12px] text-muted-foreground">
             <span className="tabular-nums">
               {stats.chars} chars · {stats.words} words · {tags} #
@@ -1143,6 +1151,7 @@ function MediaDrop({
               placeholder={caption.slice(0, 80) || "A quiet bookstore window at dusk, no text"}
             />
           </div>
+          <MagicWand kind="image" value={imagePrompt} onChange={setImagePrompt} pageId={pageId} compact />
           <Hint label="Creates one still with the selected image model. Marked as AI media. You still click Send to post.">
             <Button
               type="button"

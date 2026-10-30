@@ -85,6 +85,62 @@ export const OFFICIAL_GUIDES: OfficialGuide[] = [
     why: "Graph cannot create Pages. Open Facebook's official creator, make unique Pages, add yourself as Admin, then Connect here to import them.",
     fetchable: false,
   },
+  {
+    id: "app-roles",
+    title: "App roles (Admin / Developer / Tester)",
+    url: "https://developers.facebook.com/docs/development/build-and-test/app-roles",
+    why: "In Development Mode only app roles can grant pages_* scopes. Add every operator account here before Connect; App Review is not needed for role users.",
+    fetchable: true,
+  },
+  {
+    id: "insights",
+    title: "Page Insights metrics & limitations",
+    url: "https://developers.facebook.com/docs/graph-api/reference/page/insights/",
+    why: "PosterPal syncs views from post_media_view / post_total_media_view. Insights need 100+ Page likes, update ~daily, cover 2 years, and some metrics get deprecated — sync tolerates a missing metric.",
+    fetchable: true,
+  },
+  {
+    id: "token-debugger",
+    title: "Access Token Debugger",
+    url: "https://developers.facebook.com/tools/debug/accesstoken/",
+    why: "Paste a token to see its scopes, expiry, and the app it belongs to before blaming PosterPal for a 190 error.",
+    fetchable: false,
+  },
+  {
+    id: "app-review",
+    title: "App Review",
+    url: "https://developers.facebook.com/docs/app-review",
+    why: "Only needed to use the app with people who are not app roles. A personal desk stays in Development Mode.",
+    fetchable: true,
+  },
+  {
+    id: "business-settings",
+    title: "Meta Business settings",
+    url: "https://business.facebook.com/settings",
+    why: "Link Pages, people, and the app to a business portfolio; Commerce Manager shops live under the same portfolio.",
+    fetchable: false,
+  },
+  {
+    id: "commerce-manager",
+    title: "Commerce Manager",
+    url: "https://business.facebook.com/commerce",
+    why: "Facebook/Instagram Shops: catalog + sales channel + checkout URL. Fourthwall's Meta app supplies the checkout URL.",
+    fetchable: false,
+  },
+  {
+    id: "data-use-checkup",
+    title: "Data Use Checkup",
+    url: "https://developers.facebook.com/docs/development/maintaining-data-access/data-use-checkup",
+    why: "Meta asks verified apps to re-confirm data use annually. Keep the privacy-policy URL current or the app can lose access.",
+    fetchable: true,
+  },
+  {
+    id: "platform-terms",
+    title: "Meta Platform Terms",
+    url: "https://developers.facebook.com/terms/",
+    why: "The license covers Platform APIs only. Do not automate the Facebook UI, scrape, or use unofficial access to get around it.",
+    fetchable: true,
+  },
 ];
 
 const ALLOWED_HOSTS = new Set(["developers.facebook.com", "developers.meta.com"]);

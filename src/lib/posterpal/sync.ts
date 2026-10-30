@@ -3,6 +3,7 @@ import { getSql } from "@/lib/db";
 import { localSentiment } from "./ai";
 import { decryptSecret } from "./crypto";
 import { GraphRequestError, graphFetch } from "./graph";
+import { fetchPostMediaViews } from "./insights";
 import { getPageToken, getSetting, listPages, recordLog, recordQuota } from "./repo";
 import type { PageRow, SyncResult } from "./types";
 
@@ -228,30 +229,30 @@ async function syncOnePage(
   `;
   for (const row of ourPosts) {
     try {
+      // Engagement fields first. They never depend on Insights, so a deprecated
+      // insight metric can no longer take down reactions/comments/shares for the
+      // whole Page (Page Insights metrics get deprecated; the docs warn that an
+      // invalid metric errors the request: developers.facebook.com/docs/graph-api/
+      // reference/page/insights/).
       const pack = await graphFetch<{
         id?: string;
         shares?: { count?: number };
         reactions?: { summary?: { total_count?: number } };
         comments?: { summary?: { total_count?: number }; data?: GraphComment[] };
-        insights?: { data?: Array<{ name?: string; values?: Array<{ value?: number }> }> };
       }>({
         path: `/${row.facebook_post_id}`,
         token,
         appSecret,
         query: {
           fields:
-            "id,shares,reactions.summary(total_count).limit(0),comments.limit(50).summary(total_count){id,from,message,created_time,is_hidden},insights.metric(post_media_view,post_total_media_view)",
+            "id,shares,reactions.summary(total_count).limit(0),comments.limit(50).summary(total_count){id,from,message,created_time,is_hidden}",
         },
       });
       const reactions = Number(pack.data.reactions?.summary?.total_count ?? 0);
       const comments = Number(pack.data.comments?.summary?.total_count ?? 0);
       const shares = Number(pack.data.shares?.count ?? 0);
-      const insightRows = pack.data.insights?.data ?? [];
-      const views =
-        Number(insightRows.find((r) => r.name === "post_total_media_view")?.values?.[0]?.value ?? 0) ||
-        Number(insightRows.find((r) => r.name === "post_media_view")?.values?.[0]?.value ?? 0) ||
-        Number(insightRows[0]?.values?.[0]?.value ?? 0) ||
-        null;
+      // Views are best-effort and tried most-specific first.
+      const views = await fetchPostMediaViews(row.facebook_post_id, token, appSecret);
       await sql`
         update posts set
           reactions_count = ${reactions},
@@ -274,6 +275,8 @@ async function syncOnePage(
     }
   }
 }
+
+
 
 async function upsertComment(
   userId: string,

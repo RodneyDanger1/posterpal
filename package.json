@@ -30,10 +30,12 @@
     "mobile:sync": "npx cap sync android && node scripts/patch-android.mjs",
     "mobile:apk": "npx cap sync android && node scripts/patch-android.mjs && node scripts/assemble-apk.mjs",
     "lint": "eslint .",
-    "format": "prettier --write ."
+    "format": "prettier --write .",
+    "audit:capabilities": "node scripts/capability-audit.mjs --write"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.5.4",
+    "@formkit/auto-animate": "^0.10.0",
     "@hookform/resolvers": "^5.7.0",
     "@radix-ui/react-accordion": "^1.2.12",
     "@radix-ui/react-alert-dialog": "^1.1.15",

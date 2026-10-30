@@ -26,6 +26,7 @@ import { toast } from "sonner";
 import { UserButton } from "@/lib/auth/gates";
 import { useCurrentUserState } from "@/lib/auth/use-current-user";
 import { bootstrapApp, savePrefs, searchFn, syncNowFn, tickFn } from "@/lib/posterpal/fns";
+import { fuzzyFilter } from "@/lib/posterpal/fuzzy";
 import type { HomeSnapshot, PageRow } from "@/lib/posterpal/types";
 import { adoptLivePageId, useShellStore } from "@/lib/store";
 import { cn, formatFanCount } from "@/lib/utils";
@@ -93,17 +94,19 @@ export function AppShell({ children, right }: { children: React.ReactNode; right
       else if (h.tickerFresh || h.schedulerFresh || h.workerFresh) setDeskChip("live");
       else setDeskChip("idle");
     };
-    const health = window.setInterval(() => {
-      void fetch("/api/health", { cache: "no-store" })
+    const pollHealth = () =>
+      fetch("/api/health", { cache: "no-store" })
         .then((r) => r.json())
         .then(applyHealth)
         .catch(() => setDeskChip("down"));
+    // Background tabs: skip network/heartbeat work entirely and resync the moment
+    // the operator comes back. This is the single biggest idle-CPU win in the shell.
+    const health = window.setInterval(() => {
+      if (document.visibilityState === "visible") void pollHealth();
     }, 30_000);
-    void fetch("/api/health", { cache: "no-store" })
-      .then((r) => r.json())
-      .then(applyHealth)
-      .catch(() => setDeskChip("down"));
+    void pollHealth();
     const t = window.setInterval(() => {
+      if (document.visibilityState !== "visible") return;
       void tickFn().catch((e: unknown) => {
         const msg = e instanceof Error ? e.message : "Local scheduler stalled. Due posts are in Needs you.";
         toast.error(msg);
@@ -112,10 +115,18 @@ export function AppShell({ children, right }: { children: React.ReactNode; right
         );
       });
     }, 60_000);
+    const onVisibility = () => {
+      if (document.visibilityState !== "visible") return;
+      void pollHealth();
+      void tickFn().catch(() => undefined);
+      void bootstrapApp().then(setData).catch(() => undefined);
+    };
+    document.addEventListener("visibilitychange", onVisibility);
     return () => {
       cancelled = true;
       window.clearInterval(t);
       window.clearInterval(health);
+      document.removeEventListener("visibilitychange", onVisibility);
     };
   }, [user]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -137,13 +148,12 @@ export function AppShell({ children, right }: { children: React.ReactNode; right
     return () => window.removeEventListener("keydown", onKey);
   }, [setCommandOpen, navigate]);
 
-  const pages = data?.pages ?? [];
+  const pages = useMemo(() => data?.pages ?? [], [data?.pages]);
   const selected = pages.find((p) => p.id === selectedPageId) ?? pages[0] ?? null;
-  const filteredPages = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return pages;
-    return pages.filter((p) => p.name.toLowerCase().includes(q) || (p.category ?? "").toLowerCase().includes(q));
-  }, [pages, query]);
+  const filteredPages = useMemo(
+    () => fuzzyFilter(pages, query, (p) => [p.name, p.category]),
+    [pages, query],
+  );
 
   if (isPending) {
     return (
@@ -163,6 +173,12 @@ export function AppShell({ children, right }: { children: React.ReactNode; right
 
   return (
     <div className="flex min-h-screen bg-background">
+      <a
+        href="#desk-main"
+        className="sr-only focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-[100] focus:rounded-md focus:bg-card focus:px-3 focus:py-2 focus:text-sm focus:font-semibold focus:shadow-lift"
+      >
+        Skip to content
+      </a>
       {railOpen ? (
         <button
           type="button"
@@ -235,11 +251,14 @@ export function AppShell({ children, right }: { children: React.ReactNode; right
                 <Link
                   to={item.to}
                   onClick={() => setRailOpen(false)}
+                  aria-current={active ? "page" : undefined}
+                  data-active={active ? "true" : undefined}
                   className={cn(
-                    "relative flex h-10 items-center gap-3 rounded-md px-3 text-[14px] font-medium transition-colors duration-150",
-                    active ? "bg-accent text-accent-foreground" : "text-foreground hover:bg-muted",
+                    "group relative flex h-10 items-center gap-3 overflow-hidden rounded-md px-3 text-[14px] font-medium transition-[color,background-color,transform] duration-150",
+                    active ? "bg-accent text-accent-foreground" : "text-foreground hover:bg-muted active:scale-[0.99]",
                   )}
                 >
+                  <span className="nav-indicator" aria-hidden />
                   <Icon className="size-[18px]" />
                   <span className="flex-1">{item.label}</span>
                   {badge ? (
@@ -255,7 +274,7 @@ export function AppShell({ children, right }: { children: React.ReactNode; right
       </aside>
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="flex h-14 items-center gap-3 border-b border-border bg-card px-3 md:px-4">
+        <header className="topbar sticky top-0 z-20 flex h-14 items-center gap-3 border-b border-border px-3 md:px-4">
           <Button variant="ghost" size="icon" className="md:hidden" onClick={() => setRailOpen(true)} aria-label="Open navigation">
             <Menu className="size-5" />
           </Button>
@@ -325,13 +344,14 @@ export function AppShell({ children, right }: { children: React.ReactNode; right
                 variant="ghost"
                 size="icon"
                 aria-label="Toggle theme"
+                className="group/theme"
                 onClick={() => {
                   const next = theme === "dark" ? "light" : "dark";
                   setTheme(next);
                   void savePrefs({ data: { theme: next } });
                 }}
               >
-                {theme === "dark" ? <Sun className="size-4" /> : <Moon className="size-4" />}
+                {theme === "dark" ? <Sun className="size-4 transition-transform duration-300 group-hover/theme:rotate-45" /> : <Moon className="size-4 transition-transform duration-300 group-hover/theme:-rotate-12" />}
               </Button>
             </Hint>
             {deskChip ? (
@@ -353,7 +373,7 @@ export function AppShell({ children, right }: { children: React.ReactNode; right
               >
                 <span
                   className={`size-1.5 rounded-full ${
-                    deskChip === "live" ? "bg-success" : deskChip === "idle" ? "bg-warning" : "bg-destructive"
+                    deskChip === "live" ? "live-dot bg-success text-success" : deskChip === "idle" ? "bg-warning" : "bg-destructive"
                   }`}
                 />
                 {deskChip === "live" ? "Desk live" : deskChip === "idle" ? "Desk idle" : "Desk down"}
@@ -364,8 +384,13 @@ export function AppShell({ children, right }: { children: React.ReactNode; right
         </header>
 
         <div className="flex min-h-0 flex-1">
-          <main className="page-enter min-w-0 flex-1 overflow-auto p-3 pb-[calc(4.5rem+env(safe-area-inset-bottom))] md:p-4 md:pb-4">
-            {children}
+          <main
+            id="desk-main"
+            className="page-wash min-w-0 flex-1 overflow-auto p-3 pb-[calc(4.5rem+env(safe-area-inset-bottom))] md:p-4 md:pb-4"
+          >
+            <div key={pathname} className="page-enter">
+              {children}
+            </div>
           </main>
           {right ? (
             <aside className="hidden w-[320px] shrink-0 overflow-auto border-l border-border bg-card p-4 xl:block">
@@ -406,11 +431,14 @@ function PageRowButton({
       <button
         type="button"
         onClick={onClick}
+        aria-current={active ? "page" : undefined}
+        data-active={active ? "true" : undefined}
         className={cn(
-          "mb-0.5 flex min-h-11 w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors duration-150",
-          active ? "bg-accent" : "hover:bg-muted",
+          "group relative mb-0.5 flex min-h-11 w-full items-center gap-2 overflow-hidden rounded-md px-2 py-1.5 text-left transition-[background-color,transform] duration-150",
+          active ? "bg-accent" : "hover:bg-muted active:scale-[0.99]",
         )}
       >
+        <span className="nav-indicator" aria-hidden />
         <PageAvatar id={page.id} name={page.name} pictureUrl={page.picture_url} size={32} ring={active} />
         <span className="min-w-0 flex-1">
           <span className="block truncate text-[13px] font-semibold">{page.name}</span>

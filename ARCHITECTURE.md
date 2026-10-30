@@ -1054,7 +1054,10 @@ Added since the sections above were written:
 | Messenger | `src/lib/posterpal/{messenger,messenger-fns}.ts`, `src/routes/messenger.tsx`, `src/routes/api/facebook/messenger.ts` | `X-Hub-Signature-256` verification before storage, 24-hour window enforced in `sendMessengerReplyFn`, no Message Tags, echoes recorded as outbound |
 | Media files | `src/lib/posterpal/media-files.ts`, `src/routes/api/media/$id.ts`, `migrations/0014` | content-addressed by SHA-256; per-user path; traversal guard; 25 MB cap; `POSTERPAL_MEDIA_DIR` / APPDATA / cwd resolution |
 | Needs-you | `devices.needsYou`, `agent-skills.personaForNeed`, `types.NeedsItem` | new `commerce` and `messenger` kinds; commerce connection errors, missing webhook secret, Messenger window countdown |
-| Tests | `scripts/{commerce,print-assets,media-files,quiet-hours}.test.mjs`, `e2e/{commerce,messenger}.spec.ts` | 44 new unit tests + 8 new e2e specs; smoke canary includes `/commerce` and `/messenger` |
+| Tests | `scripts/{commerce,print-assets,media-files,quiet-hours,providers,insights}.test.mjs`, `e2e/{commerce,messenger}.spec.ts` | 57 new unit tests + 8 new e2e specs; smoke canary includes `/commerce` and `/messenger` |
+| Provider catalog | `src/lib/posterpal/providers.ts` | Verified model lists/timeouts/aspect ratios (2026-10-29), `textSpec`/`imageSpec`/`vendorImageOptions`; `ai.ts` tries the list in order |
+| Insights | `src/lib/posterpal/insights.ts` | Post media views fetched separately from engagement with metric fallback; invalid metric returns null, never 0 |
+| UI system | `src/styles.css`, `src/components/ui/*`, `app-shell.tsx` | Motion tokens, `.stagger`/`.lift`/`.skeleton`, rail indicator, keyed route transition, visibility-aware polling, skip link |
 
 Deliberate boundaries: checkout stays Fourthwall-hosted (Merchant of Record); no order-creation API is
 called; Printful is not implemented (official docs are login-gated); Printify order submission was

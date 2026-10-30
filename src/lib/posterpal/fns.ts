@@ -70,6 +70,10 @@ export const saveAiKeysFn = createServerFn({ method: "POST" })
       fal?: string;
       defaultTextProvider?: string;
       defaultImageProvider?: string;
+      customBaseUrl?: string;
+      customTextModel?: string;
+      customImageModel?: string;
+      customKey?: string;
     }) => d,
   )
   .handler(async ({ context, data }) => {
@@ -488,10 +492,23 @@ export const deleteSnippetFn = createServerFn({ method: "POST" })
 
 export const imaginePhotoFn = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
-  .validator((d: { prompt: string; provider?: string; pageId?: string }) => d)
+  .validator(
+    (d: {
+      prompt: string;
+      provider?: string;
+      pageId?: string;
+      /** "1:1" | "16:9" | … — mapped per vendor by the provider catalog. */
+      aspectRatio?: string | null;
+      /** Vendor size string where supported (e.g. OpenAI "1536x1024"). */
+      size?: string | null;
+    }) => d,
+  )
   .handler(async ({ context, data }) => {
     const ops = await import("./ops");
-    return ops.imaginePhoto(context.userId, data.prompt, data.provider, data.pageId);
+    return ops.imaginePhoto(context.userId, data.prompt, data.provider, data.pageId, {
+      aspectRatio: data.aspectRatio ?? null,
+      size: data.size ?? null,
+    });
   });
 
 export const probeTextFn = createServerFn({ method: "POST" })

@@ -6,8 +6,9 @@ import { expect, test } from "@playwright/test";
 
 test("commerce page renders the Fourthwall connection form without claiming a connection", async ({ page }) => {
   await page.goto("/commerce");
-  await expect(page.getByRole("heading", { name: "Commerce", exact: true })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Fourthwall connection" })).toBeVisible();
+  // First hit compiles the route in dev; give it room before asserting content.
+  await expect(page.getByRole("heading", { name: "Commerce", exact: true })).toBeVisible({ timeout: 45_000 });
+  await expect(page.getByRole("heading", { name: "Fourthwall connection" })).toBeVisible({ timeout: 45_000 });
   await expect(page.getByText("not connected")).toBeVisible();
   await expect(page.getByLabel("Open API username")).toBeVisible();
   await expect(page.getByLabel("Open API password")).toBeVisible();

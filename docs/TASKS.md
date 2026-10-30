@@ -44,6 +44,11 @@ Status legend: **DONE** (evidence) · **PARTIAL** · **BLOCKED** (needs credenti
 | C17 | Needs-you integration for commerce + Messenger | **DONE** | `devices.needsYou` new kinds; `personaForNeed` mapping; `types.NeedsItem` widened |
 | C18 | Commerce credential-overwrite defect (self-review) | **DONE** | blank credentials keep the stored secret; half-filled errors; covered by e2e |
 | C19 | UI polish: loading/retry states, variant buy links, print presets, live thread refresh, Ctrl+Enter reply | **DONE** | `/commerce` + `/messenger`; 390px + 1440px Chromium: no overflow, 0 errors |
+| C20 | UI system overhaul: motion tokens, stagger/lift/shimmer, rail indicator, keyed route transitions, skip link, visibility-aware polling, lazy media images, debounced work | **DONE** | `src/styles.css`, `components/ui/*`, `app-shell.tsx`, home/inbox/media; lint warnings 10→9; browser: 0 console/page errors |
+| C21 | Provider catalog verified against vendor docs + runtime fallbacks + aspect/size support | **DONE** | `providers.ts`, `ai.ts`, `ops.imaginePhoto`, Media UI aspect selector; 11 provider tests |
+| C22 | Insights metric-fallback hardening (deprecated metrics cannot kill engagement sync) | **DONE** | `insights.ts` + `sync.ts` split; 4 tests (`scripts/insights.test.mjs`) |
+| C23 | Meta research: app/dashboard click path, audience-stats reality, browser-automation ToS answer, troubleshooting | **DONE** | `docs/META-GRAPH-AND-APP.md`; official links added to `facebook-docs.ts` |
+| C24 | Provider research doc + verified/unverified register | **DONE** | `docs/PROVIDERS.md` |
 
 ## D. Commerce / Fourthwall (goal 2, part 1)
 | # | Task | Status | Evidence |
@@ -75,6 +80,24 @@ Status legend: **DONE** (evidence) · **PARTIAL** · **BLOCKED** (needs credenti
 | F4 | 90-day plan + KPIs + risks | **DONE** | `docs/BUSINESS-PLAN.md` §8–10 |
 | F5 | 20–50 vetted suppliers with samples | **TODO** | needs sample orders + line sheets; framework given |
 | F6 | Business plan document/PDF | **DONE** | `docs/BUSINESS-PLAN.md` |
+
+| C25 | Security review of the `awesome-freellm-apis` repo/list | **DONE** | GitHub API + raw README reviewed; verdict: markdown-only, not malware, but untrusted third-party links — no endpoint imported |
+| C26 | Guarded custom OpenAI-compatible provider (text+image) | **DONE** | `network-guard.ts` (SSRF/DNS/redirect/protocol), `providers.ts` custom entries, `ai.ts` custom handlers, Settings UI, `saveAiKeys` validation; 17 tests |
+| C27 | Focus/online refresh for home, inbox, drafts, analytics | **DONE** | `src/lib/use-focus-refresh.ts`; no hidden-tab polling; debounced 15–30 s |
+| C28 | Scheduler hardening: transient-failure backoff + log pruning | **DONE** | rate-limit/retryable Graph errors reschedule with `retryDelayMs` (max 3/hour), 90-day scheduler-log prune |
+| C29 | Capability audit (source-derived matrix + drift test) | **DONE** | `scripts/capability-audit.mjs --write` → `docs/CAPABILITY-AUDIT.md`; `scripts/capability-audit.test.mjs` fails on drift |
+
+| C30 | Magic Wand prompt improver (caption + image, works with no AI key) | **DONE** | `prompt-craft.ts` deterministic engine (structure, clichés, hashtags, CTA, length, locks), `prompt-fns.ts` AI-first/fallback, `e2e/magic-wand.spec.ts` |
+| C31 | Saved post styles + structured locks (server-persisted) | **DONE** | `prompt_prefs` + `prompt_styles` in app_settings; wand UI create/select/locks; variants pipeline reads the saved style |
+| C32 | Caption quality algorithm + structured caption system prompt | **DONE** | `scoreCaption` (hook/specificity/CTA/length/spam/readability), `buildCaptionSystemPrompt` wired into `generateCaptionVariants` |
+| C33 | Wand UX polish: gradient affordance, panel/sparkle/chip motion, undo, score chip | **DONE** | `styles.css` wand animations; reduced-motion disabled |
+| C34 | Capability audit re-run with wand/styles markers | **DONE** | `docs/CAPABILITY-AUDIT.md` regenerated; audit test green |
+
+| C35 | Image metadata scrub before publish (EXIF/GPS/XMP) | **DONE** | `image-sanitize.ts` (sharp re-encode, sRGB, orientation baked, alpha kept); wired in publish + AI stills; 8 tests; deliberately does NOT strip SynthID/visible watermarks — see `docs/IMAGE-PROVENANCE.md` |
+| C36 | Magic-byte media validation | **DONE** | `mime-sniff.ts`; `saveMediaBytes` trusts signatures over client MIME; image bytes can never masquerade as video |
+| C37 | Fuzzy Page rail search | **DONE** | `fuzzy.ts` (subsequence scoring, word boundaries); wired into app-shell rail filter |
+| C38 | List auto-animation | **DONE** | `@formkit/auto-animate` (MIT, ~3 KB) on inbox rows + draft queue |
+| C39 | Image provenance policy doc | **DONE** | `docs/IMAGE-PROVENANCE.md` — sanitize yes, watermark/SynthID removal refused by name |
 
 ## G. Diagrams (PlantUML)
 | # | Diagram | Status |

@@ -13,6 +13,8 @@ import { isRemixDraft } from "@/lib/posterpal/briefing";
 import type { PostRow } from "@/lib/posterpal/types";
 import { relativeTime, copyText } from "@/lib/utils";
 import { useAgentBriefStore, useInspectorStore, useShellStore } from "@/lib/store";
+import { useFocusRefresh } from "@/lib/use-focus-refresh";
+import { useAutoAnimate } from "@formkit/auto-animate/react";
 
 export const Route = createFileRoute("/drafts")({
   validateSearch: (s: Record<string, unknown>): { tab?: "drafts" | "queued" | "failed" } => {
@@ -41,12 +43,15 @@ function Drafts() {
   const [q, setQ] = useState("");
   const [retrying, setRetrying] = useState(false);
   const [activeId, setActiveId] = useState<string | null>(null);
+  const [listRef] = useAutoAnimate<HTMLDivElement>();
+
   const load = () => {
     void listPostsFn({ data: { pageId, limit: 100 } })
       .then(setPosts)
       .catch((e: unknown) => toast.error(e instanceof Error ? e.message : "Could not load drafts"));
   };
   useEffect(load, [pageId]);
+  useFocusRefresh(load, { minIntervalMs: 15_000 });
 
   const needle = q.trim().toLowerCase();
   const matches = (p: PostRow) =>
@@ -93,7 +98,7 @@ function Drafts() {
   }, [visible, activeId, openInspector]);
 
   return (
-    <div className="space-y-4">
+    <div ref={listRef} className="space-y-4">
       <PageHeader
         title="Drafts & queue"
         line="Local drafts, Facebook slots, and failed Graph publishes for the selected Page."

@@ -195,9 +195,14 @@ export type SettingsBag = {
     gemini: boolean;
     deepseek: boolean;
     flux: boolean;
+    custom: boolean;
   };
   defaultTextProvider: string;
   defaultImageProvider: string;
+  /** OpenAI-compatible endpoint saved by the operator (plaintext, non-secret). */
+  customBaseUrl: string | null;
+  customTextModel: string | null;
+  customImageModel: string | null;
   facebookLastError: string | null;
   facebookLastRedirect: string | null;
   facebookConnected: boolean;

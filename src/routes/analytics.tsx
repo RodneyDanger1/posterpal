@@ -11,6 +11,7 @@ import { bestHourSlot, contentMix, dayLabel, formatSlotLabel, hourHeatmap, nextD
 import type { AnalyticsPoint } from "@/lib/posterpal/types";
 import { useInspectorStore, useShellStore } from "@/lib/store";
 import { format } from "date-fns";
+import { useFocusRefresh } from "@/lib/use-focus-refresh";
 
 export const Route = createFileRoute("/analytics")({ component: () => <Guard><Analytics /></Guard> });
 
@@ -44,6 +45,14 @@ function Analytics() {
         toast.error(msg);
       });
   }, [pageId, days]);
+
+  // Quiet re-fetch on focus: keeps the current chart until fresh data lands.
+  const refresh = () => {
+    void analyticsFn({ data: { pageId, days } })
+      .then(setPack)
+      .catch(() => undefined);
+  };
+  useFocusRefresh(refresh, { minIntervalMs: 30_000 });
 
   const series = useMemo(() => {
     const rows = pack?.rows ?? [];

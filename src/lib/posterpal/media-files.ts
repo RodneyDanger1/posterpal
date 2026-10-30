@@ -16,6 +16,7 @@
  * it. Nothing silently claims a file exists when it does not.
  */
 import { createHash } from "node:crypto";
+import { sniffMime } from "./mime-sniff";
 import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import { dirname, join, resolve, sep } from "node:path";
 import { decodeDataUrl } from "./graph";

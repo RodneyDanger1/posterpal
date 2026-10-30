@@ -5,10 +5,11 @@ import { Guard } from "@/components/guard";
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { MagicWand } from "@/components/magic-wand";
 import { Hint } from "@/components/ui/tooltip";
 import { imaginePhotoFn, mediaLibraryFn, getSettingsFn } from "@/lib/posterpal/fns";
 import { inferMediaKind } from "@/lib/posterpal/operator";
-import { IMAGE_PROVIDERS } from "@/lib/posterpal/providers";
+import { IMAGE_PROVIDERS, imageSpec } from "@/lib/posterpal/providers";
 import type { MediaLibraryItem, SettingsBag } from "@/lib/posterpal/types";
 import { useAgentBriefStore, useShellStore } from "@/lib/store";
 import { dataUrlFromUrl } from "@/lib/utils";
@@ -23,6 +24,7 @@ function Media() {
   const [prompt, setPrompt] = useState("");
   const [busy, setBusy] = useState(false);
   const [provider, setProvider] = useState("grok");
+  const [aspect, setAspect] = useState("1:1");
   const [settings, setSettings] = useState<SettingsBag | null>(null);
   const [filter, setFilter] = useState("");
 
@@ -67,6 +69,7 @@ function Media() {
             onChange={(e) => setPrompt(e.target.value)}
             placeholder="Bookstore window at dusk, no text, no logos"
           />
+          <MagicWand kind="image" value={prompt} onChange={setPrompt} pageId={pageId} compact className="mt-1" />
         </div>
         <div className="space-y-1">
           <label className="text-[13px] font-medium" htmlFor="lib-provider">Model</label>
@@ -74,7 +77,12 @@ function Media() {
             id="lib-provider"
             className="h-9 rounded-md border border-input bg-background px-2 text-sm"
             value={provider}
-            onChange={(e) => setProvider(e.target.value)}
+            onChange={(e) => {
+              const id = e.target.value;
+              setProvider(id);
+              const caps = imageSpec(id);
+              setAspect((prev) => (caps.aspectRatios.includes(prev) ? prev : (caps.aspectRatios[0] ?? "1:1")));
+            }}
           >
             {IMAGE_PROVIDERS.map((p) => (
               <option key={p.id} value={p.id}>
@@ -84,6 +92,20 @@ function Media() {
             ))}
           </select>
         </div>
+        <div className="space-y-1">
+          <label className="text-[13px] font-medium" htmlFor="lib-aspect">Aspect</label>
+          <select
+            id="lib-aspect"
+            className="h-9 rounded-md border border-input bg-background px-2 text-sm"
+            value={aspect}
+            onChange={(e) => setAspect(e.target.value)}
+          >
+            {imageSpec(provider).aspectRatios.map((ratio) => (
+              <option key={ratio} value={ratio}>{ratio}</option>
+            ))}
+          </select>
+        </div>
+        <p className="w-full text-[11px] text-muted-foreground">{imageSpec(provider).hint}</p>
         <Hint label="One image per click. Spends the selected model's quota. Nothing is posted until you send it from Composer.">
           <Button
             disabled={busy}
@@ -93,7 +115,7 @@ function Media() {
                 return;
               }
               setBusy(true);
-              void imaginePhotoFn({ data: { prompt, provider, pageId } })
+              void imaginePhotoFn({ data: { prompt, provider, pageId, aspectRatio: aspect } })
                 .then((r) => {
                   if ("error" in r) {
                     toast.error(r.error);
@@ -159,9 +181,15 @@ function Media() {
                     ? String(r.data_url)
                     : null;
               return (
-            <figure key={String(r.id)} className="overflow-hidden rounded-xl bg-card shadow-card">
+            <figure key={String(r.id)} className="group lift overflow-hidden rounded-xl bg-card shadow-card">
               {src ? (
-                <img src={src} alt={String(r.alt_text ?? r.file_name)} className="aspect-square w-full object-cover" />
+                <img
+                  src={src}
+                  alt={String(r.alt_text ?? r.file_name)}
+                  loading="lazy"
+                  decoding="async"
+                  className="aspect-square w-full object-cover transition-transform duration-300 ease-out group-hover:scale-[1.03]"
+                />
               ) : (
                 <div className="grid aspect-square place-items-center bg-muted text-sm text-muted-foreground">{String(r.media_kind)}</div>
               )}

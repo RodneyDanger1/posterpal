@@ -7,6 +7,30 @@
 [Messenger Platform](https://developers.facebook.com/documentation/business-messaging/messenger-platform/send-messages) ·
 [Pages API](https://developers.facebook.com/documentation/pages-api/posts)
 
+> **Companion doc:** [META-GRAPH-AND-APP.md](META-GRAPH-AND-APP.md) has the exact dashboard URLs,
+> audience/stats reality (Page Insights vs personal profile), the troubleshooting matrix, and the
+> answer on browser automation ("don't drive Chrome through Facebook — do the 10-minute manual
+> setup and use Graph for data").
+
+## Plain-English TL;DR (what you actually click)
+
+1. Open <https://developers.facebook.com/apps/creation/> → **Other** → **Business** → name it
+   **PosterPal**.
+2. In the new app: **Add product → Facebook Login → Settings** → paste
+   `http://127.0.0.1:8080/api/facebook/callback` into **Valid OAuth Redirect URIs**; turn
+   **Client OAuth Login** and **Web OAuth Login** on. Leave **App Domains** empty on localhost.
+3. **Settings → Basic**: copy the **App ID**, click **Show** for **App Secret**.
+4. In PosterPal: **Settings → Facebook app** → paste both → Save. Then **Connect** → approve the
+   Pages permissions. Your Pages appear in the left rail.
+5. Post one test item (Composer → Publish now). If it fails, open
+   <https://developers.facebook.com/tools/debug/accesstoken/> and check the token's scopes/expiry.
+6. Stats: **Analytics** tab → **Sync**. Page-level insights need **100+ Page likes**; post reactions,
+   comments, shares and media views sync regardless. Your *personal profile* analytics are not
+   available to any app — see [META-GRAPH-AND-APP.md](META-GRAPH-AND-APP.md) §2.
+7. Messenger: PosterPal **Messenger** page → save a verify token → Meta app → **Messenger →
+   Settings → Webhooks → Add Callback URL** (`https://<host>/api/facebook/messenger`) → subscribe
+   `messages` + `messaging_postbacks` → select the Page.
+
 ---
 
 ## 1. Plain-English map

@@ -19,6 +19,7 @@ import type { HomeSnapshot } from "@/lib/posterpal/types";
 import { useAgentBriefStore, useInspectorStore, useShellStore } from "@/lib/store";
 import { formatFanCount, relativeTime } from "@/lib/utils";
 import { NeedsYou } from "@/components/needs-you";
+import { useFocusRefresh } from "@/lib/use-focus-refresh";
 
 export const Route = createFileRoute("/")({ component: HomePage });
 
@@ -58,6 +59,9 @@ function PagesHome() {
         toast.error(msg);
       });
   };
+
+  // Re-sync the desk when the operator comes back to the tab.
+  useFocusRefresh(() => void reload());
 
   useEffect(() => {
     let c = false;
@@ -226,7 +230,7 @@ function PagesHome() {
         });
         const alarm = vaultAlarm(data.vaultExpiresAt);
         return (
-          <>
+          <div className="stagger space-y-4">
             {data.failedCount > 0 ? (
               <div className="rounded-lg bg-destructive/10 px-3 py-2 text-sm">
                 {data.failedCount} failed publish{data.failedCount === 1 ? "" : "es"} on this desk.{" "}
@@ -292,7 +296,7 @@ function PagesHome() {
                 </ul>
               </CardContent>
             </Card>
-          </>
+          </div>
         );
       })()}
 
@@ -318,7 +322,7 @@ function PagesHome() {
         </div>
       ) : null}
 
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+      <div className="stagger grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
         {data.pages.map((p) => {
           const pm = data.pageMetrics[p.id];
           return (
@@ -326,7 +330,7 @@ function PagesHome() {
               key={p.id}
               type="button"
               onClick={() => setPage(p.id)}
-              className={`rounded-xl bg-card p-4 text-left shadow-card transition-colors ${
+              className={`lift rounded-xl bg-card p-4 text-left shadow-card ${
                 selectedPageId === p.id ? "ring-2 ring-primary" : "hover:bg-muted/40"
               }`}
             >

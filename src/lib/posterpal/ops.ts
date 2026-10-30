@@ -7,6 +7,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { getSql } from "@/lib/db";
 import { deleteMediaBytes, mediaUrlFor, storeDataUrl } from "./media-files";
 import { analyzeContent, aiAvailable, chatWithProvider, draftReplies, generateCaptionVariants, generateImageWithProvider, localSentiment, suggestHashtags } from "./ai";
+import { customImageEndpoint, customTextEndpoint } from "./custom-provider";
 import { GRAPH_VERSION, REQUIRED_SCOPES } from "./constants";
 import { buildAuthorizeUrl, facebookScheduleWindow, graphFetch, GraphRequestError, unixSeconds } from "./graph";
 import {
@@ -221,14 +222,53 @@ export async function saveAiKeys(
     fal?: string;
     defaultTextProvider?: string;
     defaultImageProvider?: string;
+    /** OpenAI-compatible endpoint (validated: https/DNS/public). Blank clears it. */
+    customBaseUrl?: string;
+    customTextModel?: string;
+    customImageModel?: string;
+    customKey?: string;
   },
 ) {
   if (data.openai?.trim()) await setSetting(userId, "openai_api_key", data.openai.trim(), true);
   if (data.google?.trim()) await setSetting(userId, "google_api_key", data.google.trim(), true);
   if (data.deepseek?.trim()) await setSetting(userId, "deepseek_api_key", data.deepseek.trim(), true);
   if (data.fal?.trim()) await setSetting(userId, "fal_api_key", data.fal.trim(), true);
-  if (data.defaultTextProvider) await setSetting(userId, "default_text_provider", data.defaultTextProvider, false);
-  if (data.defaultImageProvider) await setSetting(userId, "default_image_provider", data.defaultImageProvider, false);
+  if (data.defaultTextProvider) {
+    const { textSpec } = await import("./providers");
+    try {
+      textSpec(data.defaultTextProvider);
+    } catch {
+      throw new Error(`Unknown caption provider "${data.defaultTextProvider}".`);
+    }
+    await setSetting(userId, "default_text_provider", data.defaultTextProvider, false);
+  }
+  if (data.defaultImageProvider) {
+    const { imageSpec } = await import("./providers");
+    try {
+      imageSpec(data.defaultImageProvider);
+    } catch {
+      throw new Error(`Unknown image provider "${data.defaultImageProvider}".`);
+    }
+    await setSetting(userId, "default_image_provider", data.defaultImageProvider, false);
+  }
+  if (data.customBaseUrl !== undefined) {
+    const raw = data.customBaseUrl.trim();
+    if (!raw) {
+      await setSetting(userId, "custom_base_url", null, false);
+    } else {
+      const { resolveProviderBaseUrl } = await import("./network-guard");
+      const safe = await resolveProviderBaseUrl(raw);
+      if (!safe.ok) throw new Error(`Custom endpoint rejected: ${safe.reason}`);
+      await setSetting(userId, "custom_base_url", safe.baseUrl, false);
+    }
+  }
+  if (data.customTextModel !== undefined) {
+    await setSetting(userId, "custom_text_model", data.customTextModel.trim() || null, false);
+  }
+  if (data.customImageModel !== undefined) {
+    await setSetting(userId, "custom_image_model", data.customImageModel.trim() || null, false);
+  }
+  if (data.customKey?.trim()) await setSetting(userId, "custom_api_key", data.customKey.trim(), true);
   return { ok: true as const };
 }
 
@@ -237,7 +277,67 @@ async function providerKey(userId: string, provider: string): Promise<string | n
   if (provider === "gemini") return getSetting(userId, "google_api_key");
   if (provider === "deepseek") return getSetting(userId, "deepseek_api_key");
   if (provider === "flux") return getSetting(userId, "fal_api_key");
+  if (provider === "custom") return getSetting(userId, "custom_api_key");
   return null;
+}
+
+/**
+ * Everything needed to call the operator's default caption model, including the
+ * custom endpoint config. Shared by caption generation and the Magic Wand.
+ */
+export async function textRuntime(userId: string): Promise<{
+  provider: TextProviderId;
+  apiKey: string | null;
+  custom: { baseUrl: string; model: string } | null;
+  style: string;
+  customDirective: string | null;
+}> {
+  const settings = await getSettings(userId);
+  const provider = (settings.defaultTextProvider || "grok") as TextProviderId;
+  const key = await providerKey(userId, provider);
+  const custom = provider === "custom" ? await customTextEndpoint(userId) : null;
+  const prefs = await promptPrefs(userId);
+  const saved = prefs.style?.startsWith("custom:")
+    ? await savedPromptStyles(userId)
+    : [];
+  const customStyle = saved.find((s) => `custom:${s.id}` === prefs.style) ?? null;
+  return { provider, apiKey: key, custom, style: prefs.style ?? "default", customDirective: customStyle?.directive ?? null };
+}
+
+export type PromptPrefs = {
+  style?: string;
+  locks?: Record<string, boolean>;
+  audience?: string;
+  imageStyle?: string;
+};
+
+export type SavedPromptStyle = {
+  id: string;
+  name: string;
+  kind: "caption" | "image" | "both";
+  directive: string;
+  createdAt: string;
+};
+
+export async function promptPrefs(userId: string): Promise<PromptPrefs> {
+  const raw = await getSetting(userId, "prompt_prefs");
+  if (!raw) return {};
+  try {
+    return JSON.parse(raw) as PromptPrefs;
+  } catch {
+    return {};
+  }
+}
+
+export async function savedPromptStyles(userId: string): Promise<SavedPromptStyle[]> {
+  const raw = await getSetting(userId, "prompt_styles");
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    return Array.isArray(parsed) ? (parsed as SavedPromptStyle[]) : [];
+  } catch {
+    return [];
+  }
 }
 
 export async function savePrefs(
@@ -1179,6 +1279,7 @@ export async function generateReplyDrafts(userId: string, commentId: string) {
       pageName: page?.name ?? "Page",
       provider,
       apiKey: key,
+    custom: await customTextEndpoint(userId),
     });
   } else {
     drafts = [
@@ -1371,6 +1472,11 @@ export async function generateVariants(
       question: `${data.brief.trim()}\n\nWhat would you add? Tell us in the comments.`,
     };
   }
+  const prefs = await promptPrefs(userId);
+  const savedStyles = await savedPromptStyles(userId);
+  const customStyle = prefs.style?.startsWith("custom:")
+    ? (savedStyles.find((s) => `custom:${s.id}` === prefs.style) ?? null)
+    : null;
   const v = await generateCaptionVariants({
     brief: data.brief,
     brandVoice: page.brand_voice,
@@ -1378,6 +1484,9 @@ export async function generateVariants(
     merchCta: data.merchCta,
     provider,
     apiKey: key,
+    custom: await customTextEndpoint(userId),
+    style: (prefs.style && !prefs.style.startsWith("custom:") ? prefs.style : "default") as import("./prompt-craft").PromptStyleId,
+    customDirective: customStyle?.directive ?? null,
   });
   return { ai: true as const, provider, ...v };
 }
@@ -1398,6 +1507,7 @@ export async function hashtags(userId: string, data: { pageId: string; caption: 
     pageName: page?.name ?? "Page",
     provider,
     apiKey: key,
+  custom: await customTextEndpoint(userId),
   });
   return { tags, ai: true as const, provider };
 }
@@ -1417,7 +1527,7 @@ export async function analyze(userId: string, content: string, providerHint?: st
       provider,
     };
   }
-  const a = await analyzeContent(content, { provider, apiKey: key });
+  const a = await analyzeContent(content, { provider, apiKey: key, custom: await customTextEndpoint(userId) });
   return { ...a, ai: true as const, provider };
 }
 
@@ -1668,11 +1778,24 @@ async function persistMediaAsset(
   return id;
 }
 
-export async function imaginePhoto(userId: string, prompt: string, provider?: string, pageId?: string) {
+export async function imaginePhoto(
+  userId: string,
+  prompt: string,
+  provider?: string,
+  pageId?: string,
+  imageOptions?: { aspectRatio?: string | null; size?: string | null },
+) {
   const settings = await getSettings(userId);
   const chosen = (provider || settings.defaultImageProvider || "grok") as ImageProviderId;
   const key = await providerKey(userId, chosen);
-  const result = await generateImageWithProvider({ provider: chosen, prompt, apiKey: key });
+  const result = await generateImageWithProvider({
+    provider: chosen,
+    prompt,
+    apiKey: key,
+    aspectRatio: imageOptions?.aspectRatio ?? null,
+    size: imageOptions?.size ?? null,
+  custom: await customImageEndpoint(userId),
+  });
   if ("dataUrl" in result) {
     const assetId = await persistMediaAsset(userId, {
       pageId,
@@ -1702,6 +1825,7 @@ export async function probeTextProvider(userId: string, providerHint?: string) {
     const text = await chatWithProvider({
       provider,
       apiKey: key,
+      custom: await customTextEndpoint(userId),
       maxTokens: 16,
       system: "Reply with the single word pong.",
       user: "ping",

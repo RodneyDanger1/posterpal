@@ -124,6 +124,99 @@ Scanned `src/ server/ scripts/ electron/ e2e/` for `TODO|FIXME|XXX|HACK|placehol
 | `vite build` (Vercel/Nitro) | **exit 0** |
 | Chromium: `/`, `/commerce`, `/messenger`, `/media` @1440 + @390 | HTTP 200, **0 console/page errors**, no horizontal overflow |
 
+**Third pass — UI system, providers, Meta research**
+- Design system: motion tokens in `styles.css` (`--ease-out-expo`, durations), `.stagger` cascade,
+  `.lift`, `.skeleton` shimmer, `.nav-indicator`, `dialog/menu/tooltip` data-state animations,
+  slim scrollbars, selection colour, `.page-wash`; reduced-motion neutralises all of it.
+- Shell: keyed route transition, blurred sticky topbar, skip-to-content link, live-desk pulse,
+  **visibility-aware polling** (background tabs stop `/api/health` + tick traffic and resync on
+  return), memoised page list (one less re-render warning), theme-icon micro-animation.
+- Shared components: Button focus ring + elevation, Card transition, Input/Textarea hover/focus
+  states, Badge border, Skeleton shimmer, Dialog overlay blur.
+- Tabs: home staggered cards + lift; media lazy images with hover zoom; inbox `content-visibility`;
+  per-tab overflow verified at 390px.
+- Providers: catalog rewritten as the single source of truth with **verified** model IDs and
+  per-vendor aspect/size/timeout support; `ai.ts` tries the list in order; Media gains an aspect
+  selector; 11 provider tests pin primary IDs.
+- Insights: media views fetched separately with metric fallback (`insights.ts`) so a deprecated
+  metric (Meta's June 2026 deprecations) cannot kill reactions/comments/shares sync; 4 tests.
+- Docs: `META-GRAPH-AND-APP.md` (exact dashboard URLs, audience-stats reality, automation/ToS
+  answer, troubleshooting matrix) and `PROVIDERS.md` (verified matrix + UNVERIFIED register);
+  official links added to `facebook-docs.ts`.
+
+| Gate after third pass | Result |
+|---|---|
+| `tsc --noEmit` | **0 errors** |
+| `eslint .` | **0 errors**, 9 warnings (down from 10) |
+| Unit tests (18 files) | **176 pass / 0 fail** |
+| Playwright e2e | **26 passed** (2.4 min) |
+| `vite build` (Vercel/Nitro) | **exit 0** |
+| Chromium @1440/@390 | home/inbox/media/analytics: no overflow, 0 console/page errors; home applies 16 staggered cards |
+
+**Fourth pass — security review, custom provider, scheduler/refresh, capability audit**
+- **List review:** `open-free-llm-api/awesome-freellm-apis` inspected via GitHub API + raw README.
+  Verdict: **markdown-only directory (no code/binaries/releases), not malware**, but an untrusted
+  link list (third-party gateways can log prompts; companion playground is not for keys). No
+  endpoint from it is bundled. See `docs/PROVIDERS.md` §custom.
+- **Custom OpenAI-compatible provider** (text + image) with SSRF guard: HTTPS-only, loopback only
+  behind `POSTERPAL_ALLOW_LOCAL_PROVIDERS=1`, DNS-rebinding check at save **and** use, redirects
+  rejected, no credentials/query/fragment; Settings UI + validation + 17 tests.
+- **Capability audit:** `npm run audit:capabilities` derives the matrix from source (84 server fns,
+  8 personas, 18 skills, 10 providers, capability markers, Graph paths) and writes
+  `docs/CAPABILITY-AUDIT.md`; `capability-audit.test.mjs` fails on drift. Current verdict: all
+  claimed capabilities have a code path; 2 unreferenced server fns reported (warn-grade).
+- **Scheduler:** retryable Graph errors (rate limits) now reschedule with `retryDelayMs` up to 3×/hour
+  instead of parking the post in Failed; scheduler logs pruned at 90 days.
+- **Real-time refresh:** focus/visibility/online refresh hook wired to home, inbox, drafts,
+  analytics; hidden tabs do no polling; shell tick toasts back off after repeated failures.
+- **UI animations:** staggered inbox rows; existing motion system reused (no new dependencies).
+
+**Sixth pass — image integrity + small OSS upgrades**
+- **Metadata scrub, not provenance evasion:** `image-sanitize.ts` re-encodes publish-bound images
+  through sharp (EXIF/GPS/XMP/ICC dropped, orientation baked, sRGB, 4:4:4, alpha kept). Visible
+  watermark and SynthID removal are **refused by name** — SynthID is pixel-domain and stripping it
+  breaches generator terms; Meta expects AI disclosure. Policy: `docs/IMAGE-PROVENANCE.md`.
+- **Magic-byte validation:** `mime-sniff.ts` + `saveMediaBytes` reject files whose bytes don't match
+  the claimed image/video family (unknown image signatures rejected).
+- **Fuzzy rail search:** `fuzzy.ts` subsequence matcher replaces substring matching in the Page rail.
+- **Auto-animate lists:** `@formkit/auto-animate` (MIT, tiny) animates inbox rows and draft cards
+  without touching layout; respects the existing motion tokens.
+- Tests: 8 media-integrity tests; capability audit re-run (25 markers).
+
+**Fifth pass — the Magic Wand (prompt craft)**
+- `src/lib/posterpal/prompt-craft.ts`: deterministic prompt engine — issue detection, 8 style
+  presets, 7 image looks, 6 structured locks, image-prompt structurer (subject/approach/
+  composition/light/constraints, strips logo/text/watermark/likeness wording), caption rewriter
+  (cliché removal, tag dedupe/cap, emoji/bang normalisation, hook line, neutral CTA placeholder,
+  length lock), accent-insensitive caption score (hook/specificity/CTA/length/spam/readability),
+  and structured system prompts for AI rewrites.
+- `prompt-fns.ts`: AI-first improve with **honest fallback** (`ai:false` + reason), saved styles,
+  persisted prefs/locks/audience. `ops.textRuntime` resolves provider + key + custom endpoint.
+- `components/magic-wand.tsx`: popover with style/look/locks/audience, preview, applied chips,
+  Accept/Again/Undo, save-style form; gradient hairline button with live score; panel/sparkle/chip
+  animations (reduced-motion disabled).
+- Wired into Composer caption, Composer image prompt, and Media image prompt. Variants pipeline now
+  uses `buildCaptionSystemPrompt` + saved style.
+- Tests: 19 prompt-craft + audit pins; e2e `magic-wand.spec.ts` (local path, empty guard, image
+  risk stripping) alongside inbox/commerce/canary fixes.
+
+| Gate after fifth pass | Result |
+|---|---|
+| `tsc --noEmit` | **0 errors** |
+| `eslint .` | **0 errors**, 9 warnings |
+| Unit tests (22 files) | **203 pass / 0 fail** |
+| `vite build` | **exit 0** |
+| Capability audit | **exit 0** |
+
+| Gate after fourth pass | Result |
+|---|---|
+| `tsc --noEmit` | **0 errors** |
+| `eslint .` | **0 errors**, 10 warnings (all pre-existing patterns) |
+| Unit tests (20 files) | **189 pass / 0 fail** |
+| Playwright e2e | 26 specs (see report) |
+| `vite build` | **exit 0** |
+| Capability audit | **exit 0** — no claimed capability without code |
+
 ## 7. Work left — ranked
 
 **P0 (unblocks money)**

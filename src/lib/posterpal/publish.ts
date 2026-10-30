@@ -20,6 +20,7 @@ import { listContent } from "./repo";
 import { carouselPartialWarning } from "./carousel";
 import { remixCaption } from "./briefing";
 import { readMediaBytes, storeDataUrl } from "./media-files";
+import { sanitizeDataUrl } from "./image-sanitize";
 import type { ComposerInput, ContentItemRow } from "./types";
 
 export async function saveAndDispatch(userId: string, input: ComposerInput) {
@@ -99,11 +100,15 @@ export async function saveAndDispatch(userId: string, input: ComposerInput) {
     let byteSize: number | null = payload ? Math.round((payload.length * 3) / 4) : null;
     let inline: string | null = payload || null;
     if (payload.startsWith("data:")) {
+      // Metadata scrub before storage: drop EXIF/GPS/XMP, keep pixels/quality.
+      const cleanUrl = m.mimeType?.startsWith("image/")
+        ? await sanitizeDataUrl(payload, m.mimeType)
+        : payload;
       const saved = await storeDataUrl({
         userId,
         fileName: m.fileName,
         mimeType: m.mimeType ?? null,
-        dataUrl: payload,
+        dataUrl: cleanUrl,
       });
       if (saved.ok) {
         filePath = saved.media.storageKey;
@@ -830,16 +835,48 @@ export async function tickScheduler(userId: string): Promise<number> {
       await attemptGraphPublish(userId, row.id, "now");
       n += 1;
     } catch (e) {
-      const { GraphRequestError, graphOperatorMessage } = await import("./graph");
+      const { GraphRequestError, graphOperatorMessage, retryDelayMs } = await import("./graph");
       const msg =
         e instanceof GraphRequestError
           ? graphOperatorMessage(e.mapped)
           : e instanceof Error
             ? e.message
             : String(e);
+      // Transient Graph failures (rate limits) are retried with backoff instead of
+      // parking the post in Failed. Human-visible failures still stop immediately.
+      if (e instanceof GraphRequestError && e.mapped.retryable) {
+        const attempts = await sql<{ n: number }>`
+          select count(*)::int as n from scheduler_logs
+          where user_id = ${userId} and post_id = ${row.id}
+            and status = 'scheduler_retry'
+            and attempt_time > now() - interval '1 hour'
+        `;
+        const prior = Number(attempts[0]?.n ?? 0);
+        if (prior < 3) {
+          const delay = retryDelayMs(prior + 1);
+          await sql`
+            update posts
+            set status = 'LocalScheduled',
+                scheduled_publish_time = now() + (${delay} * interval '1 millisecond'),
+                error_message = ${msg},
+                updated_at = now()
+            where id = ${row.id} and user_id = ${userId}
+          `;
+          await recordLog({
+            userId,
+            postId: row.id,
+            status: "scheduler_retry",
+            error: `${msg} — retry ${prior + 1}/3 in ${Math.round(delay / 1000)}s`,
+            path: "local-scheduler",
+          });
+          continue;
+        }
+      }
       await failPost(userId, row.id, msg, Date.now(), "scheduler", e instanceof GraphRequestError ? e.mapped.code : undefined);
     }
   }
+  // Bounded maintenance: scheduler logs are unbounded otherwise.
+  await sql`delete from scheduler_logs where user_id = ${userId} and attempt_time < now() - interval '90 days'`;
   const dueGraph = await sql<{ id: string; scheduled_publish_time: string; media_type: string }>`
     select id, scheduled_publish_time, media_type from posts
     where user_id = ${userId}

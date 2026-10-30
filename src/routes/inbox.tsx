@@ -1,5 +1,6 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useAutoAnimate } from "@formkit/auto-animate/react";
 import { toast } from "sonner";
 import { Guard } from "@/components/guard";
 import { PageHeader } from "@/components/page-header";
@@ -13,6 +14,7 @@ import type { CommentRow, SnippetRow } from "@/lib/posterpal/types";
 import { useAgentBriefStore, useShellStore } from "@/lib/store";
 import { relativeTime, copyText } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
+import { useFocusRefresh } from "@/lib/use-focus-refresh";
 
 export const Route = createFileRoute("/inbox")({
   validateSearch: (s: Record<string, unknown>): { comment?: string; page?: string } => {
@@ -46,6 +48,9 @@ function Inbox() {
   const [rows, setRows] = useState<CommentRow[]>([]);
   const [active, setActive] = useState<CommentRow | null>(null);
   const [draft, setDraft] = useState("");
+  // Last suggestion we auto-filled — lets a human edit survive a background refresh.
+  const lastAutoDraft = useRef("");
+  const [listRef] = useAutoAnimate<HTMLUListElement>();
   const [syncing, setSyncing] = useState(false);
   const [phoneDetail, setPhoneDetail] = useState(false);
   const [query, setQuery] = useState("");
@@ -79,6 +84,7 @@ function Inbox() {
       .catch((e: unknown) => toast.error(e instanceof Error ? e.message : "Could not load inbox"));
   };
   useEffect(load, [filter, pageId, search.comment, search.page]);
+  useFocusRefresh(load, { minIntervalMs: 15_000 });
 
   useEffect(() => {
     void snippetsFn({ data: { pageId } })
@@ -129,7 +135,11 @@ function Inbox() {
       setDraft("");
       return;
     }
-    setDraft(draftsOf(active)[0] ?? "");
+    const suggestion = draftsOf(active)[0] ?? "";
+    // Fill the suggested reply on first selection, but NEVER clobber a reply the
+    // operator is already typing when focus-refresh reloads the list.
+    setDraft((cur) => (cur.trim() && cur !== lastAutoDraft.current ? cur : suggestion));
+    lastAutoDraft.current = suggestion;
   }, [active?.id]);
 
   return (
@@ -177,21 +187,23 @@ function Inbox() {
           className="mt-2"
           title="Filters this list locally. Does not query Facebook."
         />
-        <ul className="mt-3 space-y-1">
+        <ul ref={listRef} className="mt-3 space-y-1">
           {visible.length === 0 ? (
             <li className="rounded-xl bg-card p-4 text-sm text-muted-foreground shadow-card">
               {query.trim() ? "No comments match that search." : "Inbox zero for this filter on the selected Page."}
             </li>
           ) : (
             visible.map((c) => (
-              <li key={c.id}>
+              <li key={c.id} className="cv-auto">
                 <button
                   type="button"
                   onClick={() => {
                     setActive(c);
                     setPhoneDetail(true);
                   }}
-                  className={`w-full rounded-lg px-3 py-2 text-left ${active?.id === c.id ? "bg-accent" : "bg-card hover:bg-muted"}`}
+                  className={`w-full rounded-lg px-3 py-2 text-left transition-colors duration-150 ${
+                    active?.id === c.id ? "bg-accent" : "bg-card hover:bg-muted"
+                  }`}
                 >
                   <div className="flex items-center justify-between gap-2">
                     <span className="text-[13px] font-semibold">{c.author_name ?? "Visitor"}</span>

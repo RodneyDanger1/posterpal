@@ -66,6 +66,10 @@ export async function loadSettings(userId: string, origin: string): Promise<Sett
     facebookLastOk,
     hidePractice,
     timezone,
+    customBaseUrl,
+    customTextModel,
+    customImageModel,
+    customKey,
   ] = await Promise.all([
     getSetting(userId, "facebook_app_id"),
     getSetting(userId, "facebook_app_secret"),
@@ -85,6 +89,10 @@ export async function loadSettings(userId: string, origin: string): Promise<Sett
     getSetting(userId, "facebook_last_connect_ok"),
     getSetting(userId, "hide_practice"),
     getSetting(userId, "timezone"),
+    getSetting(userId, "custom_base_url"),
+    getSetting(userId, "custom_text_model"),
+    getSetting(userId, "custom_image_model"),
+    getSetting(userId, "custom_api_key"),
   ]);
   const grok = Boolean(process.env.XAI_API_KEY);
   const live = await sql<{ n: number }>`
@@ -107,7 +115,11 @@ export async function loadSettings(userId: string, origin: string): Promise<Sett
       gemini: Boolean(googleKey),
       deepseek: Boolean(deepseekKey),
       flux: Boolean(falKey),
+      custom: Boolean(customKey && customBaseUrl),
     },
+    customBaseUrl: customBaseUrl ?? null,
+    customTextModel: customTextModel ?? null,
+    customImageModel: customImageModel ?? null,
     defaultTextProvider: defaultTextProvider || (grok ? "grok" : openaiKey ? "openai" : googleKey ? "gemini" : deepseekKey ? "deepseek" : "grok"),
     defaultImageProvider: defaultImageProvider || (grok ? "grok" : googleKey ? "gemini" : openaiKey ? "openai" : falKey ? "flux" : "grok"),
     facebookLastError: facebookLastOk === "1" ? null : facebookLastError,

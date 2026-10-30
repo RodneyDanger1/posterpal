@@ -52,6 +52,14 @@
 
   --shadow-card: 0 1px 2px rgb(0 0 0 / 0.06), 0 0 0 1px rgb(0 0 0 / 0.03);
   --shadow-lift: 0 8px 24px rgb(0 0 0 / 0.08);
+  --shadow-lift-strong: 0 14px 40px rgb(0 0 0 / 0.14);
+
+  /* Motion tokens — one place so every surface feels like the same product. */
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --dur-fast: 120ms;
+  --dur-base: 180ms;
+  --dur-enter: 260ms;
 }
 
 .dark {
@@ -137,14 +145,46 @@
   navigation: auto;
 }
 
-.page-enter {
-  animation: page-enter 180ms ease-out;
+@media (max-width: 767px) {
+  [data-sonner-toaster] {
+    bottom: calc(4.5rem + env(safe-area-inset-bottom)) !important;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   UI SYSTEM — motion, depth, and density shared by every tab.
+   Everything here is progressive: no animation is required for usability, and
+   prefers-reduced-motion (above) neutralises all of it.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+::selection {
+  background: color-mix(in srgb, var(--color-primary) 24%, transparent);
+}
+
+/* Slim scrollbars: the rail and long lists stop looking like a browser window. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--color-muted-foreground) 35%, transparent) transparent;
+}
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-muted-foreground) 30%, transparent);
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--color-muted-foreground) 50%, transparent);
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
 }
 
 @keyframes page-enter {
   from {
     opacity: 0;
-    transform: translateY(6px);
+    transform: translateY(8px);
   }
   to {
     opacity: 1;
@@ -152,14 +192,315 @@
   }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .page-enter {
-    animation: none;
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.995);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
   }
 }
 
-@media (max-width: 767px) {
-  [data-sonner-toaster] {
-    bottom: calc(4.5rem + env(safe-area-inset-bottom)) !important;
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96) translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+@keyframes dialog-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes dialog-out {
+  from {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(6px) scale(0.98);
+  }
+}
+
+@keyframes shimmer {
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+@keyframes pulse-ring {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, currentColor 45%, transparent);
+  }
+  70% {
+    box-shadow: 0 0 0 6px color-mix(in srgb, currentColor 0%, transparent);
+  }
+  100% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, currentColor 0%, transparent);
+  }
+}
+
+@keyframes slide-in-left {
+  from {
+    opacity: 0;
+    transform: translateX(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+/* Route transition — replayed because <main> keys the inner wrapper by pathname. */
+.page-enter {
+  animation: page-enter var(--dur-enter) var(--ease-out-expo);
+}
+
+/* Content entrance. Put `.stagger` on a list/grid; direct children cascade. */
+.stagger > * {
+  animation: rise-in var(--dur-enter) var(--ease-out-expo) both;
+}
+.stagger > *:nth-child(1) { animation-delay: 0ms; }
+.stagger > *:nth-child(2) { animation-delay: 35ms; }
+.stagger > *:nth-child(3) { animation-delay: 70ms; }
+.stagger > *:nth-child(4) { animation-delay: 105ms; }
+.stagger > *:nth-child(5) { animation-delay: 140ms; }
+.stagger > *:nth-child(6) { animation-delay: 175ms; }
+.stagger > *:nth-child(7) { animation-delay: 210ms; }
+.stagger > *:nth-child(8) { animation-delay: 245ms; }
+.stagger > *:nth-child(n + 9) { animation-delay: 280ms; }
+
+.pop-in {
+  animation: pop-in var(--dur-base) var(--ease-out-expo) both;
+}
+.fade-in {
+  animation: fade-in var(--dur-base) var(--ease-out-expo) both;
+}
+
+/* Interactive surfaces: lift on hover, settle on press. */
+.lift {
+  transition:
+    transform var(--dur-base) var(--ease-out-expo),
+    box-shadow var(--dur-base) var(--ease-out-expo),
+    background-color var(--dur-base) ease-out;
+  will-change: transform;
+}
+.lift:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-lift);
+}
+.lift:active {
+  transform: translateY(0) scale(0.995);
+}
+
+.press {
+  transition: transform var(--dur-fast) var(--ease-out-expo);
+}
+.press:active {
+  transform: scale(0.97);
+}
+
+/* Skeleton shimmer (replaces flat pulse). */
+.skeleton {
+  position: relative;
+  overflow: hidden;
+  border-radius: var(--radius-md);
+  background: var(--color-muted);
+}
+.skeleton::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(
+    90deg,
+    transparent,
+    color-mix(in srgb, var(--color-card) 65%, transparent),
+    transparent
+  );
+  animation: shimmer 1.4s infinite;
+}
+
+/* Rail active indicator — one accent bar driven by CSS, no layout animation cost. */
+.nav-indicator {
+  position: absolute;
+  left: 0;
+  top: 50%;
+  height: 0;
+  width: 3px;
+  border-radius: 0 3px 3px 0;
+  background: var(--color-primary);
+  transform: translateY(-50%);
+  transition:
+    height var(--dur-base) var(--ease-out-expo),
+    opacity var(--dur-base) ease-out;
+  opacity: 0;
+}
+.group:hover .nav-indicator,
+[aria-current="page"] .nav-indicator,
+[data-active="true"] .nav-indicator {
+  height: 22px;
+  opacity: 1;
+}
+
+/* Live desk dot. */
+.live-dot {
+  animation: pulse-ring 2.2s var(--ease-out-expo) infinite;
+}
+
+/* Backdrop-blurred top bar. */
+.topbar {
+  background: color-mix(in srgb, var(--color-card) 82%, transparent);
+  backdrop-filter: saturate(1.4) blur(12px);
+  -webkit-backdrop-filter: saturate(1.4) blur(12px);
+}
+
+/* Radix surfaces animate from their own data-state (dialog, popover, tooltip…). */
+[role="dialog"][data-state="open"] {
+  animation: dialog-in var(--dur-base) var(--ease-out-expo);
+}
+[role="dialog"][data-state="closed"] {
+  animation: dialog-out var(--dur-fast) ease-in both;
+}
+[role="menu"][data-state="open"],
+[role="listbox"][data-state="open"],
+[role="tooltip"][data-state="open"] {
+  animation: pop-in var(--dur-fast) var(--ease-out-expo);
+}
+[data-radix-popper-content-wrapper] {
+  animation: fade-in var(--dur-fast) ease-out;
+}
+
+/* Long lists: skip layout/paint until near the viewport. */
+.cv-auto {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 84px;
+}
+
+/* Number columns align as the value changes. */
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Page header accent — a quiet gradient wash behind the top of a tab. */
+.page-wash {
+  background:
+    radial-gradient(900px 220px at 12% -8%, color-mix(in srgb, var(--color-primary) 9%, transparent), transparent 70%),
+    transparent;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .page-enter,
+  .stagger > *,
+  .pop-in,
+  .fade-in,
+  .nav-indicator,
+  .live-dot,
+  .skeleton::after,
+  [role="dialog"][data-state],
+  [role="menu"][data-state],
+  [role="listbox"][data-state],
+  [role="tooltip"][data-state] {
+    animation: none !important;
+  }
+  .lift:hover,
+  .lift:active {
+    transform: none;
+  }
+}
+
+/* ── Magic wand ─────────────────────────────────────────────────────────────
+   A gradient hairline marks the "this edits your words" affordance; the panel
+   lands from the button and the sparkle plays once per successful rewrite. */
+
+.magic-wand {
+  border: 1px solid transparent;
+  background:
+    linear-gradient(var(--color-card), var(--color-card)) padding-box,
+    linear-gradient(
+        120deg,
+        color-mix(in srgb, var(--color-primary) 65%, transparent),
+        color-mix(in srgb, var(--color-warning) 55%, transparent)
+      )
+      border-box;
+}
+.magic-wand:hover {
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-primary) 25%, transparent);
+}
+
+.wand-panel {
+  animation: wand-panel-in var(--dur-base) var(--ease-out-expo);
+  transform-origin: top right;
+}
+
+@keyframes wand-panel-in {
+  from {
+    opacity: 0;
+    transform: translateY(-6px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.sparkle {
+  animation: sparkle-pop 700ms var(--ease-spring);
+}
+
+@keyframes sparkle-pop {
+  0% {
+    transform: rotate(-25deg) scale(0.5);
+    opacity: 0;
+  }
+  55% {
+    transform: rotate(12deg) scale(1.25);
+    opacity: 1;
+  }
+  100% {
+    transform: rotate(0) scale(1);
+  }
+}
+
+.sparkle-wrap {
+  animation: rise-in var(--dur-base) var(--ease-out-expo);
+}
+
+.chip-in {
+  animation: pop-in 180ms var(--ease-out-expo) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wand-panel,
+  .sparkle,
+  .sparkle-wrap,
+  .chip-in {
+    animation: none !important;
+  }
+  .magic-wand:hover {
+    box-shadow: none;
   }
 }
