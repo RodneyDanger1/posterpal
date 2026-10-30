@@ -171,6 +171,29 @@ Scanned `src/ server/ scripts/ electron/ e2e/` for `TODO|FIXME|XXX|HACK|placehol
   analytics; hidden tabs do no polling; shell tick toasts back off after repeated failures.
 - **UI animations:** staggered inbox rows; existing motion system reused (no new dependencies).
 
+**Seventh pass — DeepSeek live verification + polish**
+- Live key verified against the official API: `/models` reports **deepseek-flash** and
+  **deepseek-v4-pro** only; the catalog's `deepseek-v4-flash` entry was removed. Both are
+  reasoning models and count chain-of-thought tokens against `max_tokens`, so the desk now calls
+  `deepseekTokenBudget()` (2× requested, min 900, cap 4000). Live proof: captions probe answered,
+  the Magic Wand returned a `Model rewrite` with JSON (`applied: 4`), and the UI accepted it.
+- The key is stored through the app's Settings UI in `app_settings.value_enc` (AES-256-GCM),
+  never in source or git. A mislabelled temporary write to the OpenAI slot was detected and deleted
+  after decrypt-proving it was the same key.
+- PowerShell hygiene insight: temporary `.tmp-*.mjs` files in the project root crash the Windows
+  Vite watcher (`EBUSY` → dev server exit 1). All probes now run from `%TEMP%` or
+  `node_modules/.dsh-tmp`; the 29/29 e2e run was completed with zero source edits during the run.
+- Composer variants now rank themselves with the caption score; the wand panel re-anchors on
+  scroll/resize; no-image-key state is explicit; custom endpoint has a live test button.
+
+| Gate after seventh pass | Result |
+|---|---|
+| `tsc --noEmit` | **0 errors** |
+| `eslint .` | **0 errors**, ~10 warnings |
+| Unit tests | **215+ pass / 0 fail** |
+| Playwright e2e | **29/29 pass** (3.7 min) |
+| DeepSeek live | chat probe OK · wand JSON rewrite OK · UI accept OK |
+| `vite build` | **exit 0** |
 **Sixth pass — image integrity + small OSS upgrades**
 - **Metadata scrub, not provenance evasion:** `image-sanitize.ts` re-encodes publish-bound images
   through sharp (EXIF/GPS/XMP/ICC dropped, orientation baked, sRGB, 4:4:4, alpha kept). Visible

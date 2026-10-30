@@ -99,6 +99,12 @@ Status legend: **DONE** (evidence) · **PARTIAL** · **BLOCKED** (needs credenti
 | C38 | List auto-animation | **DONE** | `@formkit/auto-animate` (MIT, ~3 KB) on inbox rows + draft queue |
 | C39 | Image provenance policy doc | **DONE** | `docs/IMAGE-PROVENANCE.md` — sanitize yes, watermark/SynthID removal refused by name |
 
+| C40 | DeepSeek caption provider live-verified (chat + wand JSON rewrite) | **DONE** | Key saved via Settings UI (AES-GCM at rest, local DB); `/models` lists `deepseek-flash` + `deepseek-v4-pro`; non-existent `deepseek-v4-flash` removed from catalog |
+| C41 | Reasoning-model token headroom | **DONE** | `deepseekTokenBudget()` doubles the budget (cap 4000) — DeepSeek counts chain-of-thought against `max_tokens` and returned empty JSON at 900; pinned by tests |
+| C42 | Variant quality ranking in Composer | **DONE** | Each generated variant shows `scoreCaption` badge; best variant highlighted; cards stagger/lift |
+| C43 | Wand panel robustness | **DONE** | Portalled panel, viewport fit, scroll/resize re-anchoring, result auto-scroll, outside-click fix — e2e 3/3 |
+| C44 | No-image-key affordance + custom endpoint test | **DONE** | Composer states stills are off without an image key (captions/wand still work); Settings has a "Test endpoint" button for the custom provider |
+
 ## G. Diagrams (PlantUML)
 | # | Diagram | Status |
 |---|---|---|

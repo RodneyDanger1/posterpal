@@ -11,7 +11,7 @@ order and falls through on retirement, so this table is a starting point, not a 
 | OpenAI | image | `gpt-image-2.5-flare` → `gpt-image-2.5-sunburst` → `gpt-image-1` | 120 s | <https://developers.openai.com/api/docs/guides/image-generation.md> |
 | Google | text | `gemini-2.5-flash` → `gemini-2.0-flash` | 60 s | — |
 | Google | image | `gemini-nano-banana-2.1` → `gemini-3.1-flash-image` → `gemini-3.1-flash-lite-image` → `gemini-2.5-flash-image` | 90 s | <https://ai.google.dev/gemini-api/docs/image-generation> |
-| DeepSeek | text | `deepseek-flash` → `deepseek-v4-pro` → legacy `deepseek-v4-flash` | 60 s | <https://api-docs.deepseek.com/> |
+| DeepSeek | text | `deepseek-flash` → `deepseek-v4-pro` (**live-verified 2026-10-30** against `/models`) | 60 s | <https://api-docs.deepseek.com/> |
 | fal | image | `fal-ai/flux/schnell` | 60 s | fal model page (not re-verified this session) |
 
 ## Verified request details
@@ -29,7 +29,7 @@ order and falls through on retirement, so this table is a starting point, not a 
   `gemini-nano-banana-2.1` is documented through the newer Interactions API; PosterPal tries it
   after the known-`generateContent` models and falls through on error.
 - **DeepSeek** — OpenAI-compatible chat at `https://api.deepseek.com/chat/completions`;
-  `deepseek-flash` is served by V4.1-Flash; legacy names still accepted but billed as Flash.
+  `deepseek-flash` and `deepseek-v4-pro` are reasoning models: chain-of-thought tokens count against `max_tokens`, so the desk doubles the requested budget (cap 4000) or JSON rewrites can return empty. Verified live with a real key: chat + wand JSON rewrite both succeed.
 
 ## UNVERIFIED claims (kept out of the UI copy)
 

@@ -145,6 +145,7 @@ const CAPABILITY_MARKERS = [
   ["Custom OpenAI-compatible provider", "src/lib/posterpal/ai.ts", "chatCustom"],
   ["Magic Wand prompt improver (works without AI)", "src/lib/posterpal/prompt-craft.ts", "improveImagePromptHeuristic"],
   ["Image metadata scrub before publish", "src/lib/posterpal/publish.ts", "sanitizeDataUrl"],
+  ["DeepSeek reasoning token headroom", "src/lib/posterpal/ai.ts", "deepseekTokenBudget"],
   ["Magic-byte upload validation", "src/lib/posterpal/media-files.ts", "sniffMime"],
   ["Fuzzy Page rail search", "src/components/app-shell.tsx", "fuzzyFilter"],
   ["List auto-animation (@formkit/auto-animate)", "src/routes/inbox.tsx", "useAutoAnimate"],

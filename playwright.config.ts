@@ -13,6 +13,7 @@ import { defineConfig } from "@playwright/test";
  * single-operator desk with shared state, and parallel mutations would flake.
  */
 export default defineConfig({
+  globalSetup: "./e2e/global-setup.ts",
   testDir: "./e2e",
   timeout: 120_000,
   expect: { timeout: 10_000 },

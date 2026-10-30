@@ -80,10 +80,10 @@ export const TEXT_PROVIDERS: readonly TextProvider[] = [
   {
     id: "deepseek",
     label: "DeepSeek",
-    hint: "Cheap captions via deepseek-flash (V4.1 Flash). No image model — use Grok, Gemini, OpenAI or Flux for stills.",
+    hint: "Cheap captions via DeepSeek. deepseek-flash is a reasoning model — the desk adds token headroom so rewrites are not truncated. No image model.",
     needsKey: true,
     settingKey: "deepseek_api_key",
-    models: ["deepseek-flash", "deepseek-v4-pro", "deepseek-v4-flash"],
+    models: ["deepseek-flash", "deepseek-v4-pro"],
     timeoutMs: 60_000,
   },
   {

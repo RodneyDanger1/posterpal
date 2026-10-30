@@ -1,6 +1,6 @@
 # PosterPal capability audit
 
-Generated: 2026-10-30T05:16:53.688Z · source-derived (not hand-written)
+Generated: 2026-10-30T06:46:23.669Z · source-derived (not hand-written)
 
 ## Matrix
 
@@ -23,6 +23,7 @@ Generated: 2026-10-30T05:16:53.688Z · source-derived (not hand-written)
 | Custom OpenAI-compatible provider | `src/lib/posterpal/ai.ts` · `chatCustom` | PASS |
 | Magic Wand prompt improver (works without AI) | `src/lib/posterpal/prompt-craft.ts` · `improveImagePromptHeuristic` | PASS |
 | Image metadata scrub before publish | `src/lib/posterpal/publish.ts` · `sanitizeDataUrl` | PASS |
+| DeepSeek reasoning token headroom | `src/lib/posterpal/ai.ts` · `deepseekTokenBudget` | PASS |
 | Magic-byte upload validation | `src/lib/posterpal/media-files.ts` · `sniffMime` | PASS |
 | Fuzzy Page rail search | `src/components/app-shell.tsx` · `fuzzyFilter` | PASS |
 | List auto-animation (@formkit/auto-animate) | `src/routes/inbox.tsx` · `useAutoAnimate` | PASS |

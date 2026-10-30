@@ -67,22 +67,29 @@ export function MagicWand({
       .catch(() => undefined);
   };
 
+  const place = () => {
+    const rect = wrapRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const width = 360;
+    const left = Math.min(Math.max(12, rect.left - width + rect.width), window.innerWidth - width - 12);
+    // Reserve room for the panel's max height so it never spills off-screen.
+    const maxPanel = Math.min(window.innerHeight * 0.7, 520);
+    const below = rect.bottom + 6;
+    const top = Math.max(12, Math.min(below, window.innerHeight - maxPanel - 12));
+    setPos({ top, left });
+  };
+
   useEffect(() => {
     if (!open) return;
     loadPrefs();
-    const rect = wrapRef.current?.getBoundingClientRect();
-    if (rect) {
-      const width = 360;
-      const left = Math.min(Math.max(12, rect.left - width + rect.width), window.innerWidth - width - 12);
-      // The panel is ~300–500 px tall. If there is not enough room below the
-      // button (common on laptop composer screens), pin it near the top so the
-      // primary action can never render off-screen.
-      // Reserve room for the panel's max height so it never spills off-screen.
-      const maxPanel = Math.min(window.innerHeight * 0.7, 520);
-      const below = rect.bottom + 6;
-      const top = Math.max(12, Math.min(below, window.innerHeight - maxPanel - 12));
-      setPos({ top, left });
-    }
+    place();
+    // Fixed panels must follow the trigger when the composer scrolls or resizes.
+    window.addEventListener("resize", place);
+    window.addEventListener("scroll", place, true);
+    return () => {
+      window.removeEventListener("resize", place);
+      window.removeEventListener("scroll", place, true);
+    };
   }, [open]);
 
   // Bring the result actions into view when a rewrite lands (small laptops).

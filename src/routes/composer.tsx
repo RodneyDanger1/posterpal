@@ -31,6 +31,7 @@ import {
   listPostsFn,
   unfurlLinkFn,
 } from "@/lib/posterpal/fns";
+import { scoreCaption } from "@/lib/posterpal/prompt-craft";
 import { applyUtm, captionHint, captionStats, countHashtags, formatSlotLabel, hasCallToAction, hourHeatmap, isQuietHour, nextDatetimeLocal, publishToast, suggestedIndustrySlot, topSlots, trimHashtags, type HeatCell } from "@/lib/posterpal/operator";
 import { inspectLink, withDefaultUtm } from "@/lib/posterpal/briefing";
 import { nextPostingSlot, slotsOrDefault, slotLabel, toLocalInput as slotToLocal } from "@/lib/posterpal/slots";
@@ -251,6 +252,14 @@ function Composer() {
   const composerPageId = useShellStore((st) => st.selectedPageId) ?? undefined;
   const stats = captionStats(s.message);
   const tags = countHashtags(s.message);
+  const variantRows = s.variants
+    ? ([
+        ["Storytelling", s.variants.storytelling],
+        ["Direct CTA", s.variants.cta],
+        ["Question", s.variants.question],
+      ] as const).map(([label, text]) => ({ label, text, score: scoreCaption(text).score }))
+    : [];
+  const bestVariantScore = variantRows.reduce((m, v) => Math.max(m, v.score), 0);
   const reuse = s.library.filter((r) => typeof r.data_url === "string" && r.data_url).slice(0, 6);
   const [unfurl, setUnfurl] = useState<{ title: string; description: string | null; image: string | null; host: string } | null>(null);
 
@@ -913,27 +922,44 @@ function Composer() {
               </select>
             </div>
           </div>
+          {s.settings && !s.settings.providers.openai && !s.settings.providers.gemini && !s.settings.providers.flux ? (
+            <p className="mt-1 text-[11px] text-muted-foreground">
+              No image model key saved — stills are off until you add one in Settings. Captions, variants and the magic wand work without it.
+            </p>
+          ) : null}
 
-          {s.variants ? (
-            <div className="grid gap-2">
-              {(
-                [
-                  ["Storytelling", s.variants.storytelling],
-                  ["Direct CTA", s.variants.cta],
-                  ["Question", s.variants.question],
-                ] as const
-              ).map(([label, text]) => (
+          {variantRows.length ? (
+            <div className="stagger grid gap-2">
+              {variantRows.map(({ label, text, score }) => (
                 <button
                   key={label}
                   type="button"
-                  className="rounded-lg border border-border p-3 text-left text-sm hover:bg-muted"
+                  className={
+                    score === bestVariantScore
+                      ? "lift rounded-lg border border-primary/40 bg-accent/40 p-3 text-left text-sm hover:bg-accent/60"
+                      : "lift rounded-lg border border-border p-3 text-left text-sm hover:bg-muted"
+                  }
                   onClick={() => {
                     s.setMessage(text);
                     s.setVariantLabel(label);
                     if (!s.variantGroupId) s.setVariantGroupId(crypto.randomUUID());
                   }}
                 >
-                  <div className="text-[11px] font-semibold text-muted-foreground">{label}</div>
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[11px] font-semibold text-muted-foreground">{label}</span>
+                    <span
+                      className={
+                        score >= 70
+                          ? "rounded-full bg-success/15 px-2 py-0.5 text-[10px] tabular-nums text-success"
+                          : score >= 45
+                            ? "rounded-full bg-warning/20 px-2 py-0.5 text-[10px] tabular-nums"
+                            : "rounded-full bg-destructive/10 px-2 py-0.5 text-[10px] tabular-nums text-destructive"
+                      }
+                      title="Caption quality: hook, specificity, CTA, length, spam, readability"
+                    >
+                      {score === bestVariantScore ? "Best · " : ""}{score}
+                    </span>
+                  </div>
                   {text}
                 </button>
               ))}

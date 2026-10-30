@@ -641,6 +641,21 @@ function Settings() {
           >
             Save custom endpoint
           </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            className="mt-2"
+            disabled={busy}
+            onClick={() => {
+              setBusy(true);
+              void probeTextFn({ data: { provider: "custom" } })
+                .then((r) => toast[r.ok ? "success" : "error"](r.ok ? "Endpoint answered." : r.detail))
+                .catch((e: unknown) => toast.error(e instanceof Error ? e.message : "Endpoint test failed"))
+                .finally(() => setBusy(false));
+            }}
+          >
+            Test endpoint
+          </Button>
         </details>
         <ul className="mt-3 space-y-1 text-[12px] text-muted-foreground">
           {TEXT_PROVIDERS.map((p) => (

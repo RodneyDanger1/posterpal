@@ -16,6 +16,15 @@ export function aiAvailable(): boolean {
   return Boolean(process.env.XAI_API_KEY);
 }
 
+/**
+ * DeepSeek reasoning models bill chain-of-thought tokens against max_tokens. A
+ * JSON rewrite that asks for ~900 output tokens can return empty content if the
+ * reasoning fits inside the same budget, so the desk doubles it and caps at 4000.
+ */
+export function deepseekTokenBudget(maxTokens: number): number {
+  return Math.min(4000, Math.max(900, Math.round(maxTokens * 2 + 400)));
+}
+
 async function requireSafeEndpoint(endpoint: CustomEndpoint | null | undefined, label: string): Promise<CustomEndpoint> {
   if (!endpoint?.baseUrl || !endpoint.model) {
     throw new Error(`${label}: set the base URL and model in Settings first.`);
@@ -191,12 +200,15 @@ export async function chatWithProvider(opts: {
   }
   if (opts.provider === "deepseek") {
     const spec = textSpec("deepseek");
+    // DeepSeek's reasoning models count chain-of-thought tokens against
+    // max_tokens. Without headroom a JSON rewrite can come back empty.
+    const budget = deepseekTokenBudget(maxTokens);
     return chatOpenAiModels(
       "https://api.deepseek.com/chat/completions",
       opts.apiKey,
       spec.models,
       spec.timeoutMs,
-      { system: opts.system, user: opts.user, maxTokens },
+      { system: opts.system, user: opts.user, maxTokens: budget },
     );
   }
   if (opts.provider === "gemini") {

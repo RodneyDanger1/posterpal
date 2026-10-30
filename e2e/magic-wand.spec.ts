@@ -5,17 +5,20 @@ import { expect, test } from "@playwright/test";
 
 async function ensureDeskSeed(page: import("@playwright/test").Page) {
   const railPractice = page.getByRole("button", { name: /· Practice/ }).first();
+  await page.goto("/");
+  // Fast path: the desk is already seeded (later tests in the same run).
+  const alreadySeeded = await expect(railPractice)
+    .toBeVisible({ timeout: 20_000 })
+    .then(() => true)
+    .catch(() => false);
+  if (alreadySeeded) return;
   await page.goto("/setup");
-  const skip = page.getByRole("button", { name: /start with 10 unique practice Pages/i });
-  if (await skip.isVisible().catch(() => false)) {
-    await skip.click();
-  } else {
-    await page.goto("/");
-    const homeSeed = page.getByRole("button", { name: /Create practice Pages/i });
-    if (await homeSeed.isVisible().catch(() => false)) await homeSeed.click();
-  }
-  // Seeding is async and lands on Pages; the rail is the proof.
-  await expect(railPractice).toBeVisible({ timeout: 60_000 });
+  await expect(page.getByRole("heading", { name: "First-run setup" })).toBeVisible({ timeout: 45_000 });
+  // The skip button seeds 10 practice Pages; retry until hydration takes the click.
+  await expect(async () => {
+    await page.getByRole("button", { name: /start with 10 unique practice Pages/i }).click({ timeout: 3000 });
+    await expect(railPractice).toBeVisible({ timeout: 5000 });
+  }).toPass({ timeout: 90_000 });
 }
 
 async function composerReady(page: import("@playwright/test").Page) {

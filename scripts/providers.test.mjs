@@ -9,6 +9,7 @@ import {
   textSpec,
   vendorImageOptions,
 } from "../src/lib/posterpal/providers.ts";
+import { deepseekTokenBudget } from "../src/lib/posterpal/ai.ts";
 
 test("every caption model is distinct and DeepSeek is captions-only", () => {
   const ids = TEXT_PROVIDERS.map((p) => p.id);
@@ -92,4 +93,18 @@ test("Flux image_size preset follows the aspect preset", () => {
   assert.equal(vendorImageOptions(imageSpec("flux"), { aspectRatio: "16:9" }).fluxSize, "landscape_4_3");
   assert.equal(vendorImageOptions(imageSpec("flux"), { aspectRatio: "9:16" }).fluxSize, "portrait_4_3");
   assert.equal(vendorImageOptions(imageSpec("flux"), { aspectRatio: "1:1" }).fluxSize, "square_hd");
+});
+
+
+test("DeepSeek catalog only lists live-verified model IDs", () => {
+  const deepseek = TEXT_PROVIDERS.find((p) => p.id === "deepseek");
+  assert.ok(deepseek);
+  assert.deepEqual(deepseek.models, ["deepseek-flash", "deepseek-v4-pro"]);
+});
+
+test("DeepSeek reserves reasoning headroom so JSON rewrites are not truncated", () => {
+  assert.equal(deepseekTokenBudget(100), 900);
+  assert.equal(deepseekTokenBudget(700), 1800);
+  assert.equal(deepseekTokenBudget(900), 2200);
+  assert.equal(deepseekTokenBudget(3000), 4000);
 });
