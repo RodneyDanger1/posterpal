@@ -27,13 +27,25 @@ export async function redeemPairingCode(data: {
   const sql = await getSql();
   const code = data.code.replace(/\s+/g, "").trim();
   if (!/^\d{6}$/.test(code)) throw new Error("Pairing code is 6 digits.");
-  const rows = await sql<{ user_id: string; expires_at: string; used_at: string | null }>`
-    select user_id, expires_at, used_at from pairing_codes where code = ${code}
+  // Single-use, atomically: the claim is one conditional UPDATE that both checks
+  // (unused + unexpired) and consumes the code. Selecting first and updating
+  // after would let two concurrent redemptions of one code both mint a device.
+  const claimed = await sql<{ user_id: string }>`
+    update pairing_codes set used_at = now()
+    where code = ${code} and used_at is null and expires_at > now()
+    returning user_id
   `;
-  const row = rows[0];
-  if (!row) throw new Error("That code is not valid. Generate a new one from Settings → Devices.");
-  if (row.used_at) throw new Error("That code was already used. Generate a new one.");
-  if (new Date(row.expires_at).getTime() < Date.now()) throw new Error("That code expired. Generate a new one.");
+  const row = claimed[0];
+  if (!row) {
+    // Claim failed — read the row once to say WHY (named refusal, not a generic 400).
+    const rows = await sql<{ expires_at: string; used_at: string | null }>`
+      select expires_at, used_at from pairing_codes where code = ${code}
+    `;
+    const existing = rows[0];
+    if (!existing) throw new Error("That code is not valid. Generate a new one from Settings → Devices.");
+    if (existing.used_at) throw new Error("That code was already used. Generate a new one.");
+    throw new Error("That code expired. Generate a new one.");
+  }
 
   const token = mintDeviceToken();
   const deviceId = randomUUID();
@@ -44,7 +56,6 @@ export async function redeemPairingCode(data: {
     insert into devices (id, user_id, name, platform, token_hash, last_seen_at)
     values (${deviceId}, ${row.user_id}, ${name}, ${platform}, ${hashDeviceToken(token)}, now())
   `;
-  await sql`update pairing_codes set used_at = now() where code = ${code}`;
   return { token, deviceId, operator: "Operator" };
 }
 

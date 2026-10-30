@@ -8,12 +8,39 @@ import {
 } from "./providers";
 import { joinBaseUrl, resolveProviderBaseUrl } from "./network-guard";
 import { buildCaptionSystemPrompt, type PromptStyleId } from "./prompt-craft";
+import {
+  platformKeyEnvName,
+  providerBadResponse,
+  providerFailure,
+  providerKeyMissing,
+  ProviderRequestError,
+} from "./provider-errors";
 
 /** A user-supplied OpenAI-compatible endpoint. Validated by network-guard. */
 export type CustomEndpoint = { baseUrl: string; model: string };
 
+/**
+ * Platform-wide key for a provider, read from the server environment.
+ *
+ * xAI and DeepSeek are supplied by the deployment (VPS `.env`), not typed into
+ * the browser: the token never touches the client. OpenAI/Gemini/Flux/custom
+ * remain BYO keys stored per operator in Settings.
+ */
+export function platformTextApiKey(provider: string): string | null {
+  const envName = platformKeyEnvName(provider);
+  if (!envName) return null;
+  const value = process.env[envName]?.trim();
+  return value ? value : null;
+}
+
+/** True when the platform xAI (Grok) key is present. Images/captions via Grok. */
+export function grokAvailable(): boolean {
+  return Boolean(platformTextApiKey("grok"));
+}
+
+/** True when ANY text model can run: platform xAI or platform DeepSeek. */
 export function aiAvailable(): boolean {
-  return Boolean(process.env.XAI_API_KEY);
+  return grokAvailable() || Boolean(platformTextApiKey("deepseek"));
 }
 
 /**
@@ -23,6 +50,19 @@ export function aiAvailable(): boolean {
  */
 export function deepseekTokenBudget(maxTokens: number): number {
   return Math.min(4000, Math.max(900, Math.round(maxTokens * 2 + 400)));
+}
+
+/**
+ * Key to send for a text call: the operator's own key when they saved one in
+ * Settings, else the platform env key (DeepSeek on the self-host stack).
+ */
+export function resolveTextApiKey(
+  provider: string,
+  provided?: string | null,
+): string | null {
+  const own = provided?.trim();
+  if (own) return own;
+  return platformTextApiKey(provider);
 }
 
 async function requireSafeEndpoint(endpoint: CustomEndpoint | null | undefined, label: string): Promise<CustomEndpoint> {
@@ -42,48 +82,61 @@ async function chatCustom(
   maxTokens: number,
 ): Promise<string> {
   const safe = await requireSafeEndpoint(endpoint, "Custom text provider");
-  const res = await fetch(joinBaseUrl(safe.baseUrl, "chat/completions"), {
-    method: "POST",
-    redirect: "error",
-    headers: {
-      "Content-Type": "application/json",
-      ...(apiKey?.trim() ? { Authorization: `Bearer ${apiKey.trim()}` } : {}),
-    },
-    body: JSON.stringify({
-      model: safe.model,
-      temperature: 0.7,
-      max_tokens: maxTokens,
-      messages: [
-        { role: "system", content: system },
-        { role: "user", content: user },
-      ],
-    }),
-    signal: AbortSignal.timeout(textSpec("custom").timeoutMs),
-  });
+  let res: Response;
+  try {
+    res = await fetch(joinBaseUrl(safe.baseUrl, "chat/completions"), {
+      method: "POST",
+      redirect: "error",
+      headers: {
+        "Content-Type": "application/json",
+        ...(apiKey?.trim() ? { Authorization: `Bearer ${apiKey.trim()}` } : {}),
+      },
+      body: JSON.stringify({
+        model: safe.model,
+        temperature: 0.7,
+        max_tokens: maxTokens,
+        messages: [
+          { role: "system", content: system },
+          { role: "user", content: user },
+        ],
+      }),
+      signal: AbortSignal.timeout(textSpec("custom").timeoutMs),
+    });
+  } catch (e) {
+    throw fetchFailure("custom", e);
+  }
   const text = await res.text();
-  if (!res.ok) throw new Error(`Custom provider ${res.status}: ${text.slice(0, 220)}`);
+  if (!res.ok) throw providerFailure("custom", { status: res.status, body: text });
   try {
     const body = JSON.parse(text) as { choices?: { message?: { content?: string } }[] };
     return body.choices?.[0]?.message?.content?.trim() ?? "";
   } catch {
-    throw new Error("Custom provider returned invalid JSON.");
+    throw providerBadResponse("custom");
   }
 }
 
+/** Turn a transport-level fetch rejection into a named provider refusal. */
+function fetchFailure(provider: string, error: unknown): ProviderRequestError {
+  if (error instanceof ProviderRequestError) return error;
+  const timedOut =
+    error instanceof DOMException
+      ? error.name === "TimeoutError" || error.name === "AbortError"
+      : /timed? ?out|abort/i.test(error instanceof Error ? error.name + " " + error.message : String(error));
+  return providerFailure(provider, { network: !timedOut, timedOut });
+}
+
 async function chat(system: string, user: string, maxTokens = 700): Promise<string> {
-  const apiKey = process.env.XAI_API_KEY;
-  if (!apiKey) {
-    throw new Error(
-      "Grok isn't configured on this desk. Open Settings, paste an OpenAI / Gemini / DeepSeek key, and pick that caption model.",
-    );
-  }
+  const apiKey = platformTextApiKey("grok");
+  if (!apiKey) throw providerKeyMissing("grok");
   const spec = textSpec("grok");
-  let last = "Grok request failed.";
+  let last: Error = providerKeyMissing("grok");
   // Model list comes from the verified catalog; a retired model falls through to
-  // the next one instead of failing the whole caption request.
+  // the next one instead of failing the whole caption request. Auth failures are
+  // NOT retried on the next model — a bad key will fail identically every time.
   for (const model of spec.models) {
     try {
       return await chatOpenAiCompat({
+        provider: "grok",
         url: "https://api.x.ai/v1/chat/completions",
         apiKey,
         model,
@@ -93,13 +146,15 @@ async function chat(system: string, user: string, maxTokens = 700): Promise<stri
         timeoutMs: spec.timeoutMs,
       });
     } catch (e) {
-      last = e instanceof Error ? e.message : String(e);
+      last = e instanceof Error ? e : new Error(String(e));
+      if (e instanceof ProviderRequestError && e.kind === "auth") break;
     }
   }
-  throw new Error(last);
+  throw last;
 }
 
 async function chatOpenAiCompat(opts: {
+  provider: string;
   url: string;
   apiKey: string;
   model: string;
@@ -109,53 +164,67 @@ async function chatOpenAiCompat(opts: {
   timeoutMs?: number;
   extra?: Record<string, unknown>;
 }): Promise<string> {
-  const res = await fetch(opts.url, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${opts.apiKey}`,
-    },
-    body: JSON.stringify({
-      model: opts.model,
-      temperature: 0.7,
-      max_tokens: opts.maxTokens,
-      messages: [
-        { role: "system", content: opts.system },
-        { role: "user", content: opts.user },
-      ],
-      ...opts.extra,
-    }),
-    signal: AbortSignal.timeout(opts.timeoutMs ?? 45_000),
-  });
+  let res: Response;
+  try {
+    res = await fetch(opts.url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${opts.apiKey}`,
+      },
+      body: JSON.stringify({
+        model: opts.model,
+        temperature: 0.7,
+        max_tokens: opts.maxTokens,
+        messages: [
+          { role: "system", content: opts.system },
+          { role: "user", content: opts.user },
+        ],
+        ...opts.extra,
+      }),
+      signal: AbortSignal.timeout(opts.timeoutMs ?? 45_000),
+    });
+  } catch (e) {
+    throw fetchFailure(opts.provider, e);
+  }
   if (!res.ok) {
     const t = await res.text();
-    throw new Error(`${opts.model} error ${res.status}: ${t.slice(0, 220)}`);
+    throw providerFailure(opts.provider, { status: res.status, body: t });
   }
-  const body = (await res.json()) as { choices?: { message?: { content?: string } }[] };
+  const body = (await res.json().catch(() => null)) as {
+    choices?: { message?: { content?: string } }[];
+  } | null;
+  if (!body) throw providerBadResponse(opts.provider);
   return body.choices?.[0]?.message?.content?.trim() ?? "";
 }
 
 async function chatGemini(apiKey: string, system: string, user: string, maxTokens: number): Promise<string> {
   const spec = textSpec("gemini");
   const models = spec.models;
-  let last = "Gemini request failed";
+  let last: Error = providerFailure("gemini", { status: 500, body: "Gemini request failed." });
   for (const model of models) {
-    const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
-        body: JSON.stringify({
-          systemInstruction: { parts: [{ text: system }] },
-          contents: [{ role: "user", parts: [{ text: user }] }],
-          generationConfig: { temperature: 0.7, maxOutputTokens: maxTokens },
-        }),
-        signal: AbortSignal.timeout(spec.timeoutMs),
-      },
-    );
+    let res: Response;
+    try {
+      res = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
+          body: JSON.stringify({
+            systemInstruction: { parts: [{ text: system }] },
+            contents: [{ role: "user", parts: [{ text: user }] }],
+            generationConfig: { temperature: 0.7, maxOutputTokens: maxTokens },
+          }),
+          signal: AbortSignal.timeout(spec.timeoutMs),
+        },
+      );
+    } catch (e) {
+      last = fetchFailure("gemini", e);
+      continue;
+    }
     const t = await res.text();
     if (!res.ok) {
-      last = `Gemini ${res.status}: ${t.slice(0, 220)}`;
+      last = providerFailure("gemini", { status: res.status, body: t });
       if (res.status === 401 || res.status === 403) break;
       continue;
     }
@@ -165,12 +234,12 @@ async function chatGemini(apiKey: string, system: string, user: string, maxToken
       };
       const text = body.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("").trim();
       if (text) return text;
-      last = "Gemini returned no text.";
+      last = providerBadResponse("gemini");
     } catch {
-      last = "Gemini returned invalid JSON.";
+      last = providerBadResponse("gemini");
     }
   }
-  throw new Error(last);
+  throw last;
 }
 
 export async function chatWithProvider(opts: {
@@ -186,49 +255,56 @@ export async function chatWithProvider(opts: {
   if (opts.provider === "custom") {
     return chatCustom(opts.custom, opts.apiKey, opts.system, opts.user, maxTokens);
   }
+  // Grok reads the platform key itself (chat()); everything else takes the
+  // operator's saved key and falls back to the platform env key when present.
   if (opts.provider === "grok") return chat(opts.system, opts.user, maxTokens);
-  if (!opts.apiKey) throw new Error(`Add your ${opts.provider} API key in Settings.`);
+  const apiKey = resolveTextApiKey(opts.provider, opts.apiKey);
+  if (!apiKey) throw providerKeyMissing(opts.provider);
   if (opts.provider === "openai") {
     const spec = textSpec("openai");
-    return chatOpenAiModels(
-      "https://api.openai.com/v1/chat/completions",
-      opts.apiKey,
-      spec.models,
-      spec.timeoutMs,
-      { system: opts.system, user: opts.user, maxTokens },
-    );
+    return chatOpenAiModels("openai", "https://api.openai.com/v1/chat/completions", apiKey, spec.models, spec.timeoutMs, {
+      system: opts.system,
+      user: opts.user,
+      maxTokens,
+    });
   }
   if (opts.provider === "deepseek") {
     const spec = textSpec("deepseek");
     // DeepSeek's reasoning models count chain-of-thought tokens against
     // max_tokens. Without headroom a JSON rewrite can come back empty.
     const budget = deepseekTokenBudget(maxTokens);
-    return chatOpenAiModels(
-      "https://api.deepseek.com/chat/completions",
-      opts.apiKey,
-      spec.models,
-      spec.timeoutMs,
-      { system: opts.system, user: opts.user, maxTokens: budget },
-    );
+    // Official OpenAI-compatible endpoint: https://api.deepseek.com + /chat/completions.
+    return chatOpenAiModels("deepseek", "https://api.deepseek.com/chat/completions", apiKey, spec.models, spec.timeoutMs, {
+      system: opts.system,
+      user: opts.user,
+      maxTokens: budget,
+    });
   }
   if (opts.provider === "gemini") {
-    return chatGemini(opts.apiKey, opts.system, opts.user, maxTokens);
+    return chatGemini(apiKey, opts.system, opts.user, maxTokens);
   }
   throw new Error("Unknown text provider");
 }
 
-/** Try each model in order; the last error is surfaced with the model name. */
+/**
+ * Try each catalog model in order; the last named failure is surfaced.
+ *
+ * Auth failures break the loop: a rejected key fails every model, and retrying
+ * would waste three calls and make the operator wait for nothing.
+ */
 async function chatOpenAiModels(
+  provider: string,
   url: string,
   apiKey: string,
   models: readonly string[],
   timeoutMs: number,
   input: { system: string; user: string; maxTokens: number },
 ): Promise<string> {
-  let last = "Request failed.";
+  let last: Error = providerKeyMissing(provider);
   for (const model of models) {
     try {
       return await chatOpenAiCompat({
+        provider,
         url,
         apiKey,
         model,
@@ -238,10 +314,11 @@ async function chatOpenAiModels(
         timeoutMs,
       });
     } catch (e) {
-      last = e instanceof Error ? e.message : String(e);
+      last = e instanceof Error ? e : new Error(String(e));
+      if (e instanceof ProviderRequestError && e.kind === "auth") break;
     }
   }
-  throw new Error(last);
+  throw last;
 }
 
 export async function generateCaptionVariants(input: {
@@ -396,7 +473,7 @@ export async function generateImageWithProvider(input: {
   try {
     if (input.provider === "custom") return imageCustom(input.custom, input.apiKey, prompt);
     if (input.provider === "grok") return grokImage(spec, prompt, vendor);
-    if (!input.apiKey) return { error: `Add your ${input.provider} API key in Settings.` };
+    if (!input.apiKey) return { error: providerKeyMissing(input.provider).message };
     if (input.provider === "openai") return openaiImage(input.apiKey, spec, prompt, vendor);
     if (input.provider === "gemini") return geminiImage(input.apiKey, spec, prompt);
     if (input.provider === "flux") return fluxImage(input.apiKey, spec, prompt, vendor);
@@ -413,40 +490,50 @@ async function grokImage(
   prompt: string,
   vendor: ImageVendorOptions,
 ): Promise<{ dataUrl: string; fileName: string } | { error: string }> {
-  const apiKey = process.env.XAI_API_KEY;
-  if (!apiKey) return { error: "Image generation needs the platform xAI key. Captions still work locally." };
-  let last = "Imagine API failed.";
+  const apiKey = platformTextApiKey("grok");
+  if (!apiKey) return { error: "Image generation needs the platform xAI key (XAI_API_KEY). Captions still work with the stored model keys." };
+  let last: Error = providerKeyMissing("grok");
   for (const model of spec.models) {
-    const res = await fetch("https://api.x.ai/v1/images/generations", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model,
-        prompt,
-        n: 1,
-        response_format: "b64_json",
-        aspect_ratio: vendor.aspectRatio,
-        // 2.0 accepts resolution=1k|2k; older models ignore unknown params.
-        ...(model.endsWith("-2.0") ? { resolution: vendor.resolution ?? "1k" } : {}),
-      }),
-      signal: AbortSignal.timeout(spec.timeoutMs),
-    });
+    let res: Response;
+    try {
+      res = await fetch("https://api.x.ai/v1/images/generations", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model,
+          prompt,
+          n: 1,
+          response_format: "b64_json",
+          aspect_ratio: vendor.aspectRatio,
+          // 2.0 accepts resolution=1k|2k; older models ignore unknown params.
+          ...(model.endsWith("-2.0") ? { resolution: vendor.resolution ?? "1k" } : {}),
+        }),
+        signal: AbortSignal.timeout(spec.timeoutMs),
+      });
+    } catch (e) {
+      last = fetchFailure("grok", e);
+      continue;
+    }
     if (!res.ok) {
       const t = await res.text();
-      last = `${model} ${res.status}: ${t.slice(0, 180)}`;
+      last = providerFailure("grok", { status: res.status, body: t });
       // Auth/permission errors will not fix themselves on the next model.
       if (res.status === 401 || res.status === 403) break;
       continue;
     }
-    const body = (await res.json()) as {
+    const body = (await res.json().catch(() => null)) as {
       data?: Array<{ b64_json?: string; url?: string }>;
-    };
+    } | null;
+    if (!body) {
+      last = providerBadResponse("grok");
+      continue;
+    }
     return packOpenAiImage(body, "imagine.png");
   }
-  return { error: last };
+  return { error: last.message };
 }
 
 async function openaiImage(
@@ -455,27 +542,33 @@ async function openaiImage(
   prompt: string,
   vendor: ImageVendorOptions,
 ): Promise<{ dataUrl: string; fileName: string } | { error: string }> {
-  let last = "OpenAI Images failed.";
+  let last: Error = providerKeyMissing("openai");
   for (const model of spec.models) {
-    const res = await fetch("https://api.openai.com/v1/images/generations", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model,
-        prompt,
-        n: 1,
-        size: vendor.size ?? "1024x1024",
-        quality: "auto",
-        output_format: "png",
-      }),
-      signal: AbortSignal.timeout(spec.timeoutMs),
-    });
+    let res: Response;
+    try {
+      res = await fetch("https://api.openai.com/v1/images/generations", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model,
+          prompt,
+          n: 1,
+          size: vendor.size ?? "1024x1024",
+          quality: "auto",
+          output_format: "png",
+        }),
+        signal: AbortSignal.timeout(spec.timeoutMs),
+      });
+    } catch (e) {
+      last = fetchFailure("openai", e);
+      continue;
+    }
     const t = await res.text();
     if (!res.ok) {
-      last = `${model} ${res.status}: ${t.slice(0, 220)}`;
+      last = providerFailure("openai", { status: res.status, body: t });
       if (res.status === 401 || res.status === 403) break;
       continue;
     }
@@ -483,10 +576,10 @@ async function openaiImage(
       const body = JSON.parse(t) as { data?: Array<{ b64_json?: string; url?: string }> };
       return packOpenAiImage(body, "openai.png");
     } catch {
-      last = `${model} returned invalid JSON.`;
+      last = providerBadResponse("openai");
     }
   }
-  return { error: last };
+  return { error: last.message };
 }
 
 async function urlToDataUrl(url: string, fallbackMime = "image/png"): Promise<string> {
@@ -520,31 +613,37 @@ async function geminiImage(
   spec: ReturnType<typeof imageSpec>,
   prompt: string,
 ): Promise<{ dataUrl: string; fileName: string } | { error: string }> {
-  let last = "Gemini image failed.";
+  let last: Error = providerKeyMissing("gemini");
   for (const model of spec.models) {
-    const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: { responseModalities: ["TEXT", "IMAGE"] },
-        }),
-        signal: AbortSignal.timeout(spec.timeoutMs),
-      },
-    );
+    let res: Response;
+    try {
+      res = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: prompt }] }],
+            generationConfig: { responseModalities: ["TEXT", "IMAGE"] },
+          }),
+          signal: AbortSignal.timeout(spec.timeoutMs),
+        },
+      );
+    } catch (e) {
+      last = fetchFailure("gemini", e);
+      continue;
+    }
     const t = await res.text();
     if (!res.ok) {
-      last = `Gemini image ${res.status}: ${t.slice(0, 220)}`;
+      last = providerFailure("gemini", { status: res.status, body: t });
       if (res.status === 401 || res.status === 403) break;
       continue;
     }
     const packed = extractGeminiInline(t);
     if ("dataUrl" in packed) return packed;
-    last = packed.error;
+    last = new Error(packed.error);
   }
-  return { error: last };
+  return { error: last.message };
 }
 
 function extractGeminiInline(raw: string): { dataUrl: string; fileName: string } | { error: string } {
@@ -607,10 +706,10 @@ async function fluxImage(
         signal: AbortSignal.timeout(spec.timeoutMs),
       });
       const t2 = await retry.text();
-      if (!retry.ok) return { error: `Flux ${retry.status}: ${t2.slice(0, 180)}` };
+      if (!retry.ok) return { error: providerFailure("flux", { status: retry.status, body: t2 }).message };
       return await packFal(t2);
     }
-    return { error: `Flux ${res.status}: ${t.slice(0, 180)}` };
+    return { error: providerFailure("flux", { status: res.status, body: t }).message };
   }
   return packFal(t);
 }
@@ -640,11 +739,11 @@ async function imageCustom(
     res = await call({ ...base, response_format: "b64_json", size: "1024x1024" });
     text = await res.text();
   }
-  if (!res.ok) return { error: `Custom image provider ${res.status}: ${text.slice(0, 220)}` };
+  if (!res.ok) return { error: providerFailure("custom", { status: res.status, body: text }).message };
   try {
     return packOpenAiImage(JSON.parse(text) as { data?: Array<{ b64_json?: string; url?: string }> }, "custom.png");
   } catch {
-    return { error: "Custom image provider returned invalid JSON." };
+    return { error: providerBadResponse("custom").message };
   }
 }
 

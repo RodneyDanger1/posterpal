@@ -370,6 +370,30 @@ export function publishToast(status: string, warning?: string | null): { ok: boo
   return { ok: status !== "Failed", text };
 }
 
+export type QueueRowOutcome = {
+  ok: boolean;
+  status: string;
+  /** Failure text for failed rows; never used for a successful row. */
+  error?: string;
+  /** Non-fatal warning (e.g. "kept on the local scheduler") for a successful row. */
+  note?: string;
+};
+
+/**
+ * One bulk-scheduler row's result. `saveAndDispatch` reports a Graph failure as
+ * `status: "Failed"` instead of throwing, so a row is only "✓ queued" when the
+ * dispatch really did not fail — the same rule `publishToast` enforces in the
+ * Composer. A warning on a success stays a note; it never masquerades as ok:false
+ * or as "queued" with no caveat.
+ */
+export function queueRowOutcome(status: string, warning?: string | null): QueueRowOutcome {
+  const note = warning?.trim() || undefined;
+  if (status === "Failed") {
+    return { ok: false, status, error: note ?? "Publish failed." };
+  }
+  return note ? { ok: true, status, note } : { ok: true, status };
+}
+
 export function toLocalInput(d: Date): string {
   const pad = (n: number) => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;

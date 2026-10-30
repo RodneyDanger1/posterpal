@@ -166,6 +166,10 @@ docker compose up -d --build
 
 Open `http://localhost:8080` and sign in. Put **HTTPS** in front (Caddy/Nginx or Cloudflare Tunnel) before Facebook Login will accept a public hostname. Then set `BETTER_AUTH_URL` and paste the URLs Settings shows into the Facebook App.
 
+**AI providers (server env only).** `XAI_API_KEY` powers Imagine stills/research; `DEEPSEEK_API_KEY` enables the **DeepSeek** caption model (official OpenAI-compatible endpoint `https://api.deepseek.com`, model `deepseek-flash`). Both are read from the server environment and never shipped to the browser; the Settings page still accepts per-operator BYO keys. When a DeepSeek key is present and no other caption key/provider is configured, DeepSeek is the default text provider. A rejected key returns a **named refusal** (`DeepSeek rejected the API key (HTTP 401)…`) in the UI, the schedule log and the Settings probe — never a silent empty caption.
+
+`POSTERPAL_ADMIN_EMAIL` / `POSTERPAL_ADMIN_PASSWORD` are the declared source of truth for the seeded operator login: on boot the app creates it (first run) or reconciles the stored password hash to the env value (rotation), so the env and the login cannot drift; rotate by editing `.env` and restarting.
+
 Health: `GET /api/health` (no auth). Exact JSON from `readDeskHealth()`:
 
 ```json

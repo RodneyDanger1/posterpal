@@ -20,7 +20,7 @@ export function BulkScheduler({ selectedPageId }: { selectedPageId: string }) {
   const [csv, setCsv] = useState("");
   const [rows, setRows] = useState<ParsedRow[]>([]);
   const [busy, setBusy] = useState(false);
-  const [results, setResults] = useState<Array<{ ok: boolean; caption: string; error?: string }> | null>(null);
+  const [results, setResults] = useState<Array<{ ok: boolean; caption: string; error?: string; note?: string }> | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   function parse() {
@@ -130,7 +130,7 @@ export function BulkScheduler({ selectedPageId }: { selectedPageId: string }) {
             {results.map((r, i) => (
               <li key={i} className={r.ok ? "text-success" : "text-destructive"}>
                 {r.ok ? "✓" : "✗"} {r.caption.slice(0, 60) || "(empty)"}
-                {r.ok ? " — queued" : ` — ${r.error ?? "failed"}`}
+                {r.ok ? ` — queued${r.note ? ` (${r.note})` : ""}` : ` — ${r.error ?? "failed"}`}
               </li>
             ))}
           </ul>

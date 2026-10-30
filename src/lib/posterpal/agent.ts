@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { getSql } from "@/lib/db";
-import { aiAvailable, chatWithProvider, draftReplies, generateCaptionVariants, localSentiment } from "./ai";
+import { chatWithProvider, draftReplies, generateCaptionVariants, grokAvailable, localSentiment, platformTextApiKey } from "./ai";
 import { getPage, getSetting } from "./repo";
 import type { TextProviderId } from "./providers";
 import {
@@ -216,7 +216,7 @@ async function draftWaitingComments(
   const sql = await getSql();
   const provider = (await getSetting(userId, "default_text_provider") || "grok") as TextProviderId;
   const apiKey = await providerKey(userId, provider);
-  const can = provider === "grok" ? aiAvailable() : Boolean(apiKey);
+  const can = provider === "grok" ? grokAvailable() : Boolean(apiKey);
   const out: AgentInboxDraft[] = [];
   for (const c of comments) {
     let drafts: string[];
@@ -283,7 +283,7 @@ export async function runDeskAgent(
 
   const provider = (input.provider || (await getSetting(userId, "default_text_provider")) || "grok") as TextProviderId;
   const apiKey = await providerKey(userId, provider);
-  const canGrok = aiAvailable();
+  const canGrok = grokAvailable();
   const brief = (input.mapPage ? mapBriefForPage(profile) : input.prompt).trim().slice(0, 2000);
   const persona: AgentPersonaId = parsePersona(input.persona) ?? pickPersona(brief, input.mapPage);
   const personaNote = `\n\n${personaSystemOverlay(persona)}`;
@@ -490,7 +490,8 @@ export async function runDeskAgent(
 async function providerKey(userId: string, provider: string): Promise<string | null> {
   if (provider === "openai") return getSetting(userId, "openai_api_key");
   if (provider === "gemini") return getSetting(userId, "google_api_key");
-  if (provider === "deepseek") return getSetting(userId, "deepseek_api_key");
+  // DeepSeek: saved operator key first, then the platform env key (self-host).
+  if (provider === "deepseek") return (await getSetting(userId, "deepseek_api_key")) ?? platformTextApiKey("deepseek");
   if (provider === "flux") return getSetting(userId, "fal_api_key");
   return null;
 }

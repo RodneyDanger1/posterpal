@@ -95,6 +95,12 @@ export async function loadSettings(userId: string, origin: string): Promise<Sett
     getSetting(userId, "custom_api_key"),
   ]);
   const grok = Boolean(process.env.XAI_API_KEY);
+  // The self-host stack supplies DeepSeek as a platform key in the server env
+  // (never typed into the browser). It counts as an available text provider even
+  // when the operator has not saved a per-user key.
+  const deepseekPlatform = Boolean(process.env.DEEPSEEK_API_KEY?.trim());
+  const deepseekReady = Boolean(deepseekKey) || deepseekPlatform;
+  const aiReady = grok || deepseekReady;
   const live = await sql<{ n: number }>`
     select count(*)::int as n from pages
     where user_id = ${userId} and is_practice = false and facebook_page_id is not null
@@ -102,7 +108,7 @@ export async function loadSettings(userId: string, origin: string): Promise<Sett
   return {
     facebookAppId: facebookAppId ?? "",
     hasFacebookSecret: Boolean(facebookSecret),
-    hasAiKey: grok,
+    hasAiKey: aiReady,
     theme: theme === "dark" ? "dark" : "light",
     defaultPageId,
     cadenceWarn: Number(cadenceWarn ?? 8) || 8,
@@ -113,14 +119,16 @@ export async function loadSettings(userId: string, origin: string): Promise<Sett
       grok,
       openai: Boolean(openaiKey),
       gemini: Boolean(googleKey),
-      deepseek: Boolean(deepseekKey),
+      deepseek: deepseekReady,
       flux: Boolean(falKey),
       custom: Boolean(customKey && customBaseUrl),
     },
     customBaseUrl: customBaseUrl ?? null,
     customTextModel: customTextModel ?? null,
     customImageModel: customImageModel ?? null,
-    defaultTextProvider: defaultTextProvider || (grok ? "grok" : openaiKey ? "openai" : googleKey ? "gemini" : deepseekKey ? "deepseek" : "grok"),
+    defaultTextProvider:
+      defaultTextProvider ||
+      (grok ? "grok" : openaiKey ? "openai" : googleKey ? "gemini" : deepseekReady ? "deepseek" : "grok"),
     defaultImageProvider: defaultImageProvider || (grok ? "grok" : googleKey ? "gemini" : openaiKey ? "openai" : falKey ? "flux" : "grok"),
     facebookLastError: facebookLastOk === "1" ? null : facebookLastError,
     facebookLastRedirect: facebookLastRedirect,

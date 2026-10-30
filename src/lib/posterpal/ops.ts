@@ -6,7 +6,7 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import { getSql } from "@/lib/db";
 import { deleteMediaBytes, mediaUrlFor, storeDataUrl } from "./media-files";
-import { analyzeContent, aiAvailable, chatWithProvider, draftReplies, generateCaptionVariants, generateImageWithProvider, localSentiment, suggestHashtags } from "./ai";
+import { analyzeContent, chatWithProvider, draftReplies, generateCaptionVariants, generateImageWithProvider, grokAvailable, localSentiment, platformTextApiKey, suggestHashtags } from "./ai";
 import { customImageEndpoint, customTextEndpoint } from "./custom-provider";
 import { GRAPH_VERSION, REQUIRED_SCOPES } from "./constants";
 import { buildAuthorizeUrl, facebookScheduleWindow, graphFetch, GraphRequestError, unixSeconds } from "./graph";
@@ -32,6 +32,7 @@ import {
   setSetting,
 } from "./repo";
 import { policyForComposer, publishExisting, saveAndDispatch, tickScheduler, attemptGraphPublish } from "./publish";
+import { queueRowOutcome } from "./operator";
 import { ensureMemory, ensureOverduePractice, expandPracticeFleet, seedPracticeWorkspace } from "./seed";
 import { syncFromGraph } from "./sync";
 import { refreshVaultTokens } from "./facebook-oauth";
@@ -275,7 +276,9 @@ export async function saveAiKeys(
 async function providerKey(userId: string, provider: string): Promise<string | null> {
   if (provider === "openai") return getSetting(userId, "openai_api_key");
   if (provider === "gemini") return getSetting(userId, "google_api_key");
-  if (provider === "deepseek") return getSetting(userId, "deepseek_api_key");
+  // DeepSeek: the operator's saved key wins; otherwise the platform key from the
+  // server environment (self-host stack) — never a browser-supplied credential.
+  if (provider === "deepseek") return (await getSetting(userId, "deepseek_api_key")) ?? platformTextApiKey("deepseek");
   if (provider === "flux") return getSetting(userId, "fal_api_key");
   if (provider === "custom") return getSetting(userId, "custom_api_key");
   return null;
@@ -846,7 +849,7 @@ export async function bulkSchedule(
   rows: Array<{ message: string; when?: string | null; pageId?: string | null }>,
   defaultPageId: string,
 ) {
-  const results: Array<{ ok: boolean; caption: string; status?: string; error?: string }> = [];
+  const results: Array<{ ok: boolean; caption: string; status?: string; error?: string; note?: string }> = [];
   for (const row of rows) {
     const caption = (row.message ?? "").trim();
     if (!caption) {
@@ -884,12 +887,8 @@ export async function bulkSchedule(
         mode: scheduledAt ? "schedule" : "local-draft",
         scheduledAt,
       });
-      results.push({
-        ok: true,
-        caption,
-        status: result.status,
-        ...(result.warning ? { error: result.warning } : {}),
-      });
+      const outcome = queueRowOutcome(result.status, result.warning);
+      results.push({ caption, ...outcome });
     } catch (e) {
       results.push({ ok: false, caption, error: e instanceof Error ? e.message : String(e) });
     }
@@ -1270,7 +1269,7 @@ export async function generateReplyDrafts(userId: string, commentId: string) {
   const settings = await getSettings(userId);
   const provider = (settings.defaultTextProvider || "grok") as TextProviderId;
   const key = await providerKey(userId, provider);
-  const can = provider === "grok" ? aiAvailable() : Boolean(key);
+  const can = provider === "grok" ? grokAvailable() : Boolean(key);
   let drafts: string[];
   if (can) {
     drafts = await draftReplies({
@@ -1460,7 +1459,7 @@ export async function generateVariants(
   if (!page) throw new Error("Page not found");
   const settings = await getSettings(userId);
   const provider = (data.provider || settings.defaultTextProvider || "grok") as TextProviderId;
-  const canGrok = aiAvailable();
+  const canGrok = grokAvailable();
   const key = await providerKey(userId, provider);
   const hasProvider = provider === "grok" ? canGrok : Boolean(key);
   if (!hasProvider) {
@@ -1496,7 +1495,7 @@ export async function hashtags(userId: string, data: { pageId: string; caption: 
   const settings = await getSettings(userId);
   const provider = (data.provider || settings.defaultTextProvider || "grok") as TextProviderId;
   const key = await providerKey(userId, provider);
-  const can = provider === "grok" ? aiAvailable() : Boolean(key);
+  const can = provider === "grok" ? grokAvailable() : Boolean(key);
   if (!can) {
     const words = data.caption.toLowerCase().split(/\W+/).filter((w) => w.length > 4).slice(0, 4);
     return { tags: words.map((w) => `#${w}`), ai: false as const, provider };
@@ -1516,7 +1515,7 @@ export async function analyze(userId: string, content: string, providerHint?: st
   const settings = await getSettings(userId);
   const provider = (providerHint || settings.defaultTextProvider || "grok") as TextProviderId;
   const key = await providerKey(userId, provider);
-  const can = provider === "grok" ? aiAvailable() : Boolean(key);
+  const can = provider === "grok" ? grokAvailable() : Boolean(key);
   if (!can) {
     return {
       sentiment: localSentiment(content),

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { cadenceLevel, REMIX_MARK, reelCapLevel, runPolicyChecklist, validateReel } from "../src/lib/posterpal/policy.ts";
-import { publishToast } from "../src/lib/posterpal/operator.ts";
+import { publishToast, queueRowOutcome } from "../src/lib/posterpal/operator.ts";
 
 test("cadenceLevel blocks at the cap, warns below it", () => {
   assert.equal(cadenceLevel(7, 8, 20), "ok");
@@ -94,4 +94,24 @@ test("Failed publishes are never reported as success toasts", () => {
   assert.equal(publishToast("Published").ok, true);
   assert.equal(publishToast("LocalScheduled", "outside window").ok, true);
   assert.match(publishToast("Failed", "no token").text, /Failed/);
+});
+
+// Regression: bulkSchedule pushed `ok: true` for every non-throwing row, so a
+// Graph-rejected schedule ("Failed") appeared as "✓ queued" in the CSV/queue UI.
+test("bulk queue rows apply the same Failed-is-not-success rule", () => {
+  const failed = queueRowOutcome("Failed", "Graph rejected the schedule (HTTP 400).");
+  assert.equal(failed.ok, false);
+  assert.equal(failed.error, "Graph rejected the schedule (HTTP 400).");
+  assert.equal(queueRowOutcome("Failed", null).ok, false);
+  assert.match(queueRowOutcome("Failed", null).error ?? "", /Publish failed/);
+
+  const scheduled = queueRowOutcome("LocalScheduled", "Outside Facebook's window — kept locally.");
+  assert.equal(scheduled.ok, true);
+  assert.equal(scheduled.status, "LocalScheduled");
+  assert.equal(scheduled.note, "Outside Facebook's window — kept locally.");
+  assert.equal(scheduled.error, undefined, "a success note must not be reported as an error");
+
+  const clean = queueRowOutcome("Published", null);
+  assert.equal(clean.ok, true);
+  assert.equal(clean.note, undefined);
 });

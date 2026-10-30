@@ -32,6 +32,8 @@ services:
       POSTERPAL_ADMIN_EMAIL: ${POSTERPAL_ADMIN_EMAIL:?set POSTERPAL_ADMIN_EMAIL in .env}
       POSTERPAL_ADMIN_PASSWORD: ${POSTERPAL_ADMIN_PASSWORD:?set POSTERPAL_ADMIN_PASSWORD in .env}
       XAI_API_KEY: ${XAI_API_KEY:-}
+      # Platform DeepSeek text key (server-side only; never baked into the image).
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
       # Public URL for OAuth redirects when behind a reverse proxy.
       BETTER_AUTH_URL: ${BETTER_AUTH_URL:-}
     ports:
@@ -58,6 +60,7 @@ services:
       BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:-}
       POSTERPAL_WORKER_INTERVAL_MS: ${POSTERPAL_WORKER_INTERVAL_MS:-60000}
       XAI_API_KEY: ${XAI_API_KEY:-}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
     volumes:
       - media:/data
     # The worker keeps the desk alive when no browser tab is open: fires due

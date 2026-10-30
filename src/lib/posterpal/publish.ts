@@ -21,6 +21,8 @@ import { carouselPartialWarning } from "./carousel";
 import { remixCaption } from "./briefing";
 import { readMediaBytes, storeDataUrl } from "./media-files";
 import { sanitizeDataUrl } from "./image-sanitize";
+import { publishBlockedReason } from "./post-state";
+import { planSchedulerRetry, retryLogMessage } from "./scheduler-policy";
 import type { ComposerInput, ContentItemRow } from "./types";
 
 export async function saveAndDispatch(userId: string, input: ComposerInput) {
@@ -224,6 +226,11 @@ export async function publishExisting(userId: string, postId: string, mode: Publ
   `;
   const row = posts[0];
   if (!row) throw new Error("Post not found");
+  // Transition guard: only a draft/failed/local-scheduled row may enter
+  // Publishing. Re-publishing a Published/Publishing/FacebookScheduled row would
+  // put a duplicate on the Page; a Cancelled row must be restored first.
+  const blocked = publishBlockedReason(row.status);
+  if (blocked) throw new Error(blocked);
   const cadence = await cadenceForPage(userId, row.page_id);
   if (cadence.level === "block") {
     throw new Error(
@@ -255,6 +262,14 @@ export async function publishExisting(userId: string, postId: string, mode: Publ
   await sql`update posts set status = 'Publishing', updated_at = now() where id = ${postId} and user_id = ${userId}`;
   return attemptGraphPublish(userId, postId, mode);
 }
+
+/** A Graph/token failure a caller may choose to retry (scheduler backoff). */
+export type PublishFailure = {
+  retryable: boolean;
+  kind: string;
+  code?: number;
+  message: string;
+};
 
 type MediaSource =
   | { kind: "http"; url: string }
@@ -304,7 +319,16 @@ export async function attemptGraphPublish(
   userId: string,
   postId: string,
   mode: PublishMode,
-): Promise<{ status: string; warning: string | null }> {
+  opts?: {
+    /**
+     * Scheduler callers own the retry policy: a retryable Graph failure is
+     * returned as `failure.retryable` instead of being parked in Failed here, so
+     * the backoff path can reschedule it. Composer callers leave this unset and
+     * keep the immediate named failure.
+     */
+    deferRetryableFailure?: boolean;
+  },
+): Promise<{ status: string; warning: string | null; failure?: PublishFailure }> {
   const sql = await getSql();
   const started = Date.now();
   const posts = await sql<Record<string, unknown>>`
@@ -488,6 +512,24 @@ export async function attemptGraphPublish(
         extra: { kind: mapped.kind, code: mapped.code, subcode: mapped.subcode, fbtrace: mapped.fbtraceId, postId },
       });
     }
+    // Scheduler-owned retry: hand a retryable failure back instead of marking the
+    // post Failed, so tickScheduler can reschedule with backoff. The post status is
+    // left to the caller (it is still Publishing, which the caller resets).
+    if (opts?.deferRetryableFailure && mapped?.retryable) {
+      await recordLog({
+        userId,
+        postId,
+        status: "scheduler_retry_pending",
+        error: failText,
+        graphCode: mapped.code,
+        durationMs: Date.now() - started,
+      });
+      return {
+        status: "RetryPending",
+        warning: failText,
+        failure: { retryable: true, kind: mapped.kind, code: mapped.code, message: failText },
+      };
+    }
     if (
       mode === "schedule" &&
       (mapped?.kind === "unknown_schedule" ||
@@ -526,7 +568,13 @@ export async function attemptGraphPublish(
     if (mapped?.kind === "token") {
       await sql`update token_vault set is_valid = false where user_id = ${userId}`;
     }
-    return { status: "Failed", warning: failText };
+    return {
+      status: "Failed",
+      warning: failText,
+      failure: mapped
+        ? { retryable: Boolean(mapped.retryable), kind: mapped.kind, code: mapped.code, message: failText }
+        : undefined,
+    };
   }
 }
 
@@ -824,6 +872,41 @@ export async function tickScheduler(userId: string): Promise<number> {
     limit 8
   `;
   let n = 0;
+  /**
+   * Reschedule one post after a retryable Graph failure. Returns false when the
+   * per-post retry budget is exhausted, so the caller parks it in Failed.
+   * The attempt count comes from `scheduler_retry` rows inside the window.
+   */
+  const rescheduleRetry = async (postId: string, msg: string, graphCode?: number): Promise<boolean> => {
+    const attempts = await sql<{ n: number }>`
+      select count(*)::int as n from scheduler_logs
+      where user_id = ${userId} and post_id = ${postId}
+        and status = 'scheduler_retry'
+        and attempt_time > now() - interval '1 hour'
+    `;
+    const prior = Number(attempts[0]?.n ?? 0);
+    const plan = planSchedulerRetry({ retryable: true, priorRetries: prior });
+    if (!plan.retry) return false;
+    const { retryDelayMs } = await import("./graph");
+    const delay = retryDelayMs(plan.attempt);
+    await sql`
+      update posts
+      set status = 'LocalScheduled',
+          scheduled_publish_time = now() + (${delay} * interval '1 millisecond'),
+          error_message = ${msg},
+          updated_at = now()
+      where id = ${postId} and user_id = ${userId} and status = 'Publishing'
+    `;
+    await recordLog({
+      userId,
+      postId,
+      status: "scheduler_retry",
+      error: retryLogMessage(plan.attempt, delay, msg),
+      graphCode: graphCode ?? null,
+      path: "local-scheduler",
+    });
+    return true;
+  };
   for (const row of due) {
     try {
       const claimed = await sql<{ id: string }>`
@@ -832,47 +915,26 @@ export async function tickScheduler(userId: string): Promise<number> {
         returning id
       `;
       if (!claimed[0]) continue;
-      await attemptGraphPublish(userId, row.id, "now");
+      // The scheduler owns retry policy: a retryable Graph failure comes back in
+      // `failure` instead of being parked in Failed inside attemptGraphPublish.
+      const result = await attemptGraphPublish(userId, row.id, "now", { deferRetryableFailure: true });
       n += 1;
-    } catch (e) {
-      const { GraphRequestError, graphOperatorMessage, retryDelayMs } = await import("./graph");
-      const msg =
-        e instanceof GraphRequestError
-          ? graphOperatorMessage(e.mapped)
-          : e instanceof Error
-            ? e.message
-            : String(e);
-      // Transient Graph failures (rate limits) are retried with backoff instead of
-      // parking the post in Failed. Human-visible failures still stop immediately.
-      if (e instanceof GraphRequestError && e.mapped.retryable) {
-        const attempts = await sql<{ n: number }>`
-          select count(*)::int as n from scheduler_logs
-          where user_id = ${userId} and post_id = ${row.id}
-            and status = 'scheduler_retry'
-            and attempt_time > now() - interval '1 hour'
-        `;
-        const prior = Number(attempts[0]?.n ?? 0);
-        if (prior < 3) {
-          const delay = retryDelayMs(prior + 1);
-          await sql`
-            update posts
-            set status = 'LocalScheduled',
-                scheduled_publish_time = now() + (${delay} * interval '1 millisecond'),
-                error_message = ${msg},
-                updated_at = now()
-            where id = ${row.id} and user_id = ${userId}
-          `;
-          await recordLog({
+      if (result.failure?.retryable) {
+        const rescheduled = await rescheduleRetry(row.id, result.failure.message, result.failure.code);
+        if (!rescheduled) {
+          await failPost(
             userId,
-            postId: row.id,
-            status: "scheduler_retry",
-            error: `${msg} — retry ${prior + 1}/3 in ${Math.round(delay / 1000)}s`,
-            path: "local-scheduler",
-          });
-          continue;
+            row.id,
+            `${result.failure.message} (retry budget exhausted)`,
+            Date.now(),
+            "scheduler",
+            result.failure.code,
+          );
         }
       }
-      await failPost(userId, row.id, msg, Date.now(), "scheduler", e instanceof GraphRequestError ? e.mapped.code : undefined);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      await failPost(userId, row.id, msg, Date.now(), "scheduler");
     }
   }
   // Bounded maintenance: scheduler logs are unbounded otherwise.
@@ -897,8 +959,24 @@ export async function tickScheduler(userId: string): Promise<number> {
           returning id
         `;
         if (!claimed[0]) continue;
-        await attemptGraphPublish(userId, row.id, "schedule");
+        const result = await attemptGraphPublish(userId, row.id, "schedule", { deferRetryableFailure: true });
         n += 1;
+        if (result.failure?.retryable) {
+          // Graph scheduling failed transiently (rate limit). Put the row back on
+          // the local scheduler and try again next tick; it keeps its real slot.
+          await sql`
+            update posts set status = 'LocalScheduled', updated_at = now()
+            where id = ${row.id} and user_id = ${userId} and status = 'Publishing'
+          `;
+          await recordLog({
+            userId,
+            postId: row.id,
+            status: "scheduler_push_failed",
+            error: result.failure.message,
+            graphCode: result.failure.code ?? null,
+            path: "local-scheduler",
+          });
+        }
       } catch (e) {
         await sql`
           update posts set status = 'LocalScheduled', updated_at = now()
@@ -908,8 +986,7 @@ export async function tickScheduler(userId: string): Promise<number> {
           userId,
           postId: row.id,
           status: "scheduler_push_failed",
-          error: e instanceof GraphRequestError ? graphOperatorMessage(e.mapped) : e instanceof Error ? e.message : String(e),
-          graphCode: e instanceof GraphRequestError ? e.mapped.code : null,
+          error: e instanceof Error ? e.message : String(e),
           path: "local-scheduler",
         });
       }

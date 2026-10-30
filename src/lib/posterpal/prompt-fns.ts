@@ -131,7 +131,7 @@ export const improvePromptFn = createServerFn({ method: "POST" })
     try {
       const runtime = await ops.textRuntime(context.userId);
       const ai = await import("./ai");
-      const canUse = runtime.provider === "grok" ? ai.aiAvailable() : Boolean(runtime.apiKey) || Boolean(runtime.custom);
+      const canUse = runtime.provider === "grok" ? ai.grokAvailable() : Boolean(runtime.apiKey) || Boolean(runtime.custom);
       if (!canUse) {
         return {
           ...fallback,
