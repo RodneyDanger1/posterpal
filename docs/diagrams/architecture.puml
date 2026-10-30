@@ -1,0 +1,39 @@
+@startuml
+!theme plain
+title PosterPal — system architecture (2026-10-29)
+
+actor "Operator\n(Riley)" as op
+rectangle "PosterPal desk\nTanStack Start :8080" {
+  component "Screens\nComposer / Calendar / Inbox\nAgent / Commerce / Messenger" as ui
+  component "Server functions\n68 + commerce + messenger" as fns
+  component "Domain layer\nops · publish · policy · repo" as domain
+  component "Commerce\nFourthwall client · print pipeline" as commerce
+  component "Messenger\nsignature · 24h window · Send API" as msg
+  component "Auth\nBetter Auth (self-host) / dev desk" as auth
+}
+database "Postgres / PGLite\n11+2 migrations" as db
+cloud "Meta Graph v26.0" as graph
+cloud "Fourthwall\nPlatform Open API" as fw
+cloud "Facebook Messenger\nSend API" as msngr
+
+op --> ui
+ui --> fns
+fns --> domain
+fns --> commerce
+fns --> msg
+fns --> auth
+domain --> db
+commerce --> db
+msg --> db
+auth --> db
+domain --> graph : OAuth + Pages API\nappsecret_proof
+commerce <--> fw : Basic auth: products, orders, media\nwebhook: X-Fourthwall-Hmac-SHA256
+msg <--> msngr : Send API + signed webhook\nX-Hub-Signature-256
+
+note right of commerce
+  Checkout is Fourthwall-hosted.
+  Building product requires:
+  upload-url > PUT > media/images
+  > POST /products
+end note
+@enduml

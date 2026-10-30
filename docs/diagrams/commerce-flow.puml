@@ -1,0 +1,41 @@
+@startuml
+!theme plain
+title Commerce: on-site storefront, Fourthwall checkout (Merchant of Record), order ingest
+
+actor "Customer" as cust
+actor "Operator" as op
+participant "PosterPal\n/api/commerce/fourthwall/checkout" as pp
+participant "Fourthwall\ncart/checkout" as fw
+participant "Fourthwall\nPlatform API" as api
+participant "PosterPal\nwebhook endpoint" as hook
+
+== Operator sets up a product ==
+op -> api : GET /product-templates/page/1
+api --> op : template + productionMethod + basePrice
+op -> op : print-assets: DPI check, upscale policy,\nsRGB, PNG, embroidery <=6 colours
+op -> api : POST /media/upload-url {fileName,contentType,size}
+api --> op : uploadUrl (GCS), fileUrl
+op -> api : PUT uploadUrl (raw bytes,\nx-goog-content-length-range)
+op -> api : POST /media/images {fileUrl,width,height}
+api --> op : imageId
+op -> api : POST /products {type:"design",regions,profitMargin}
+api --> op : productId (hidden unless publishOnCreate)
+op -> op : buy link =\n/api/commerce/fourthwall/checkout?connectionId&variantId
+
+== Customer buys ==
+cust -> pp : click buy link (fbclid, utm_*, _fbp)
+pp -> pp : log click against Page/post
+pp --> cust : 303 -> https://{shop}/cart/checkout?products=variant:1&utm_...
+cust -> fw : browse cart, pay (Fourthwall handles\ntax, fraud, refunds)
+fw --> cust : confirmation + shipping
+fw -> hook : ORDER_PLACED\nX-Fourthwall-Hmac-SHA256
+hook -> hook : verify HMAC, idempotent on event id
+hook --> fw : 200 within 2s
+api --> pp : GET /order on sync
+
+note over fw, cust
+  Fourthwall is MoR: no on-domain
+  payment form exists. Buyer leaves
+  the site only for the payment step.
+end note
+@enduml

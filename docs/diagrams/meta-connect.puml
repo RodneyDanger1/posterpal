@@ -1,0 +1,51 @@
+@startuml
+!theme plain
+title Meta connect, publish, and Messenger — official paths only
+
+actor "Operator" as op
+participant "PosterPal" as pp
+participant "Meta OAuth" as oauth
+participant "Graph v26.0" as graph
+participant "Facebook Page" as page
+participant "Messenger" as msgr
+
+== First-time connect (Development Mode, app roles only) ==
+op -> pp : Settings: App ID + App Secret
+pp -> pp : encrypt secret (AES-GCM)
+op -> pp : Connect
+pp -> oauth : popup: /api/facebook/start\n(display=popup, auth_type=rerequest)
+oauth --> op : consent screen
+op -> oauth : approve pages_* scopes
+oauth --> pp : code + state (15-min row)
+pp -> graph : exchange code (server-side)
+graph --> pp : short-lived user token
+pp -> graph : extend token, GET /me/accounts
+graph --> pp : Pages + Page tokens (CREATE_CONTENT)
+pp -> pp : store tokens encrypted
+
+== Publish (human clicks Send) ==
+op -> pp : Publish now / Schedule
+pp -> pp : policy: cadence, Jaccard duplicate,\ncross-page, #ad, alt text
+alt blocked
+  pp --> op : blocked with reason
+else allowed
+  pp -> graph : POST /{page}/feed | /photos | /videos\n+ appsecret_proof
+  graph --> pp : post id
+  pp -> pp : status Published + scheduler log
+end
+
+== Messenger (HITL) ==
+msgr -> pp : webhook POST (message)\nX-Hub-Signature-256
+pp -> pp : verify HMAC before storing
+pp -> pp : thread + 24h window
+op -> pp : write reply, click Send
+pp -> pp : refuse if window closed
+pp -> msgr : POST /{page}/messages\nmessaging_type=RESPONSE
+msgr --> page : message appears
+
+note over pp, graph
+  Never: scraping facebook.com,
+  cookie login, auto-like, auto-comment,
+  auto-DM, Group bot posting.
+end note
+@enduml

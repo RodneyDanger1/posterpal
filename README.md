@@ -33,10 +33,12 @@ Facebook is optional. First open **auto-seeds** a 10-Page practice fleet (`boots
 4. **Inbox** — needs / hidden / all / buying-intent. Pull from Facebook. Reply drafts are suggestions. **Send** POSTs `/{comment-id}/comments`. **Hide** POSTs `is_hidden`. Practice comment ids skip Graph. Sending lock prevents double-submit. **E** marks handled (`needs_reply=false`) without a Graph reply.
 5. **Drafts / Later** — tabs Drafts / Scheduled / Failed (`data-view`). Restore Cancelled → LocalDraft. Queue CSV `page,status,when,caption,link` (limit 200). Later Kanban never posts.
 6. **Analytics** — 7 / 28 / 90 day charts. CSV `id,published,message,reactions,comments,shares,media_views,variant`. A/B card only when two labeled variants share a `variant_group_id` (human reuses the leader; no auto-pick). Page Insights need 100+ likes; post views come from `post_total_media_view` / `post_media_view`. A **stale** Page id on reads returns empty (never remaps onto `pages[0]`). An omitted id still defaults to the first Page.
-7. **Media / Merchandise** — library for the selected Page. Imagine prompt ≥ 8 characters; stills are flagged `createdWithAi` and open in Composer (nothing posts from Media). Merch default UTM `utm_source=facebook&utm_medium=social&utm_campaign={slug}`; **Use in Composer** applies it. A merch URL makes policy warn for `#ad`.
+7. **Media / Merchandise** — library for the selected Page. Bytes are files on disk (`POSTERPAL_MEDIA_DIR`), served from `/api/media/{id}`. Imagine prompt ≥ 8 characters; stills are flagged `createdWithAi` and open in Composer (nothing posts from Media). Merch default UTM `utm_source=facebook&utm_medium=social&utm_campaign={slug}`; **Use in Composer** applies it. A merch URL makes policy warn for `#ad`.
 8. **Agent** — five personas (Research, Ops, Inbox, Shop, Rewrite) pick named skills (web research, diagnose, captions, inbox drafts, failed rewrite, merch CTA, policy, next slot). Still HITL. Researches the **public web** (not a Facebook scrape) from this Page’s desk profile, takes notes, drafts three captions. `agentWouldRefuse` matches `post now` / `auto-reply` / `send all replies` / `go live without me` and returns **without calling a model**. No `XAI_API_KEY`: still shows a query plan + unverified desk notes (never fake citations). Every run injects a **DESK OPS snapshot** plus HITL hops (Composer, schedule, Later, failed row inspector, vault, inbox). **Draft inbox replies** stores drafts on the comment — you still click Send. **Fix failed publishes** remixed captions open Composer. Needs you **Ask agent** queues a brief. Story captions get a policy preview. Schedule can prefill merch link, first comment, and recycle-in-30d.
 9. **Connect / Pair** — `/connect` is the 6-step official Login coach. Connect opens `/api/facebook/start` in a **popup** (`display=popup`, `auth_type=rerequest`) so the desk iframe never navigates to facebook.com. Callback consumes a 15-minute `oauth_states` row and exchanges the code against the **exact** stored redirect URI. Graph Explorer paste (token length ≥ 20) is the fallback. Pairing: `/pair` (no Guard).
 10. **Vault / Settings** — AES-GCM token vault, scheduler logs, **Desk health** (DB + in-tab ticker vs background worker). The header chip is **Desk live** (DB up and a ticker in the last 3 min), **Desk idle** (DB up, no ticker), or **Desk down**. App ID/Secret, per-Page cadence/voice/RSS/slots, **audience time zone** (heatmap and best-time chips), BYO keys (chat **40s**; Imagine Grok **45s** / OpenAI **60s** / Gemini **60s** / Flux **45s**). After Connect, practice Pages hide from the rail unless you turn hide-practice off. Rail label is **Token vault**. `/pair` and `/setup` are not in the rail. Command palette **Phone / APK pairing** goes to `/pair`.
+11. **Commerce** (new) — Fourthwall as Merchant of Record: connect with Open API credentials (Basic auth, AES-GCM encrypted), verify, sync products/orders, browse the public product-template catalogue, create a **design product from an AI still** (upload-url → PUT → media/images → POST /products), and build **on-site buy links** (`/api/commerce/fourthwall/checkout`) that log the click and 303 to Fourthwall checkout with `fbclid`/`utm_*`/`_fbp` intact. Signed webhook at `/api/commerce/fourthwall/webhook` (`X-Fourthwall-Hmac-SHA256`, idempotent on event id). Print pipeline enforces Fourthwall's DPI/format rules and refuses >4× upscales. Checkout itself is Fourthwall-hosted — that is the MoR model, not a missing feature.
+12. **Messenger** (new) — Page Messenger, HITL only: signed webhook (`X-Hub-Signature-256`) at `/api/facebook/messenger`, threads + messages in the desk, **24-hour messaging window enforced server-side** (the send refuses outside it; no Message Tags for promotion), every reply is a human click. `pages_messaging` App Review is required before non-role users can message the Page.
 
 Keyboard (Windows; `shortcut-help.tsx`): **Ctrl+K** command palette, **Ctrl+Enter** Composer send (selected mode), **Ctrl+S** local draft, **Esc** clear Composer, **N** new post, **J/K** inbox, **E** mark handled, **?** cheat sheet.
 
@@ -48,7 +50,7 @@ Later board columns (never posted): Inbox → Photo needed → Caption ready →
 
 The desk is a **working personal product**: compose → policy → publish/schedule → calendar → inbox → analytics. The queue fires without a browser tab when **Electron is running** (60s `/api/tick`) or when **`npm run worker` / Docker worker** has `DATABASE_URL`. If both are stopped, overdue `LocalScheduled` posts wait in Needs you after 10 minutes — they are not sprayed late.
 
-It is **not** “finished as a public internet SaaS.” Live Graph on *your* Pages still needs your Dev-Mode Facebook app. Media still lives as data URLs in Postgres. The research agent is a drafter, not an autopilot.
+It is **not** “finished as a public internet SaaS.” Live Graph on *your* Pages still needs your Dev-Mode Facebook app. Media is stored as **files on disk** now (`media-files.ts` + `/api/media/{id}`); inline data URLs remain only as a legacy/read-only-FS fallback. The research agent is a drafter, not an autopilot.
 
 Older write-ups disagree with the tree. Trust this table:
 
@@ -71,7 +73,7 @@ Older write-ups disagree with the tree. Trust this table:
 | Electron Windows app + sideload APK | Live |
 | CI (typecheck, lint, unit, e2e, image build) | Live |
 | Live Graph on a real Page | **Blocked on your Facebook credentials** |
-| Disk/S3 media (not data URLs) | Not started |
+| Disk/S3 media (not data URLs) | **Live (disk)** — content-addressed files, `/api/media/{id}`, Docker `media` volume |
 | Instagram / Messenger / Ads / WPF shell | Not started / out of scope |
 
 ### Done vs left vs never
@@ -90,7 +92,7 @@ Older write-ups disagree with the tree. Trust this table:
 **Needs work (real product gaps)**
 
 - Prove publish/reply/schedule on a **live** Dev-Mode Page (you)
-- Store photos/videos as files, not megabyte data URLs
+- ~~Store photos/videos as files, not megabyte data URLs~~ **Done 2026-10-29** — `commit` writes content-addressed files under `POSTERPAL_MEDIA_DIR` (default `%APPDATA%\PosterPal\media` on Windows, `<cwd>/.posterpal-media` elsewhere). Inline `data_url` is now a logged fallback for read-only filesystems only.
 - Data-driven best-time beyond this Page’s heatmap chips (chips now use the saved audience time zone)
 - Video/Reel cover picker; Stories/Reels still the least tested Graph path
 - Pin editable Page topics; optional “Dig deeper” research pass
@@ -124,7 +126,7 @@ Older write-ups disagree with the tree. Trust this table:
 
 1. Double-click [`PosterPal.bat`](PosterPal.bat), or `npm run desktop`, or the portable EXE from `npm run desktop:build` (`release/PosterPal.exe`).
 2. Desk listens on `http://127.0.0.1:8080` (and your LAN IP so a phone can join).
-3. Data: `%APPDATA%\PosterPal\pglite` and `master.key`. No Docker required. Closing the window hides to tray; the 60s `/api/tick` keeps running until you **Quit** (that stops the phone from reaching :8080). `PosterPal.bat` also starts a hidden `npm run worker`. Facebook Login opens in the **system browser**. Feed video is a normal `POST /{page}/videos` (not resumable). Reels and video Stories use `rupload.facebook.com`.
+3. Data: `%APPDATA%\PosterPal\pglite`, `master.key`, and media files in `%APPDATA%\PosterPal\media`. No Docker required. Closing the window hides to tray; the 60s `/api/tick` keeps running until you **Quit** (that stops the phone from reaching :8080). `PosterPal.bat` also starts a hidden `npm run worker`. Facebook Login opens in the **system browser**. Feed video is a normal `POST /{page}/videos` (not resumable). Reels and video Stories use `rupload.facebook.com`.
 
 Facebook Redirect URI for this app:
 
@@ -295,6 +297,13 @@ Still open from Surpass §17 (deepen research, in order): keep the refuse-regex 
 | File | Use |
 | --- | --- |
 | **This README** | Product, status, how to run |
+| [`docs/META-SETUP.md`](docs/META-SETUP.md) | Riley's Meta app → Pages → Messenger → what the terms actually allow (AI/scraping/Groups) |
+| [`docs/COMMERCE-FOURTHWALL.md`](docs/COMMERCE-FOURTHWALL.md) | Fourthwall MoR model, Facebook Shops, checkout handoff, product-creation API |
+| [`docs/AI-IMAGEGEN-PIPELINE.md`](docs/AI-IMAGEGEN-PIPELINE.md) | AI stills → print-ready files: DPI math, upscale policy, QC, ArtCraft plan |
+| [`docs/BUSINESS-PLAN.md`](docs/BUSINESS-PLAN.md) | Niche-Page network, supplier models, unit economics, 90-day plan |
+| [`docs/ANALYSIS.md`](docs/ANALYSIS.md) | 2026-10-29 verification report: gates, defects, gaps, repo hygiene |
+| [`docs/TASKS.md`](docs/TASKS.md) | Task ledger: done / blocked / todo |
+| [`docs/diagrams/`](docs/diagrams) | Rendered PlantUML: architecture, Meta connect, commerce flow, image pipeline, business model |
 | [`ARCHITECTURE.md`](ARCHITECTURE.md) | Anatomy for agents — **keep it updated when you change the tree** |
 | [`SETUP.md`](SETUP.md) | Facebook App, Graph facts, Docker, backups |
 | [`fullagencyplan.md`](fullagencyplan.md) | Agent awareness plan (status above) |

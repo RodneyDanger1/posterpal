@@ -1,0 +1,49 @@
+@startuml
+!theme plain
+title Ridgeboundia niche-Page network — business model
+
+package "Audience layer (Meta)" {
+  component "5-10 niche Pages\nhiking · nature ed · animals\nscience · biology · travel" as pages
+  component "1-3 Groups per Page\nmanual posting only" as groups
+  component "Page Messenger\nHITL replies" as dm
+}
+
+package "Content engine (PosterPal)" {
+  component "Composer + policy\ncadence · duplicate · #ad" as compose
+  component "Calendar + worker" as sched
+  component "Analytics + Agent" as ana
+}
+
+package "Monetisation" {
+  component "AI image pipeline\nprint-ready assets" as img
+  component "Fourthwall\nMoR fulfilment" as fw
+  component "Facebook / Instagram Shop\nvia Fourthwall catalog" as shop
+}
+
+actor "Audience" as aud
+actor "Operator" as op
+
+aud --> pages : follows / engages
+pages --> groups
+aud <--> dm
+op --> compose
+compose --> sched
+sched --> pages : publish (human clicks Send)
+ana --> op : reach, clicks, buyers per Page
+pages --> ana
+
+op --> img : stills per Page
+img --> fw : design products (API)
+pages --> aud : merch post + buy link (UTM)
+aud --> fw : checkout (Fourthwall-hosted)
+fw --> op : profit payout
+fw --> shop : catalog sync
+shop --> aud : discovery surface
+
+note bottom of fw
+  Zero upfront cost.
+  Inventory: none.
+  Checkout: Fourthwall.
+  Platform risk stays with Meta.
+end note
+@enduml

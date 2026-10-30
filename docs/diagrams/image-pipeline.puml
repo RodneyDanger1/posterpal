@@ -1,0 +1,39 @@
+@startuml
+!theme plain
+title AI still -> print-ready file -> Fourthwall listing
+
+start
+:Generate still\n(Grok Imagine / Gemini / GPT-image / Flux);
+:Human QC\nAI tells, gibberish text, melted anatomy,\nedge ghosts, seam safety;
+if (fails QC?) then (yes)
+  :Regenerate or retouch\n(ArtCraft / local upscaler);
+  stop
+endif
+:media asset bytes (PNG/JPG);
+:inspectImage()\nreal width/height/format/alpha;
+:requiredPixels = inches x DPI;
+if (scale > 4x?) then (yes)
+  :REJECT\nregenerate at larger size;
+  stop
+elseif (scale > 1x?) then (upscale)
+  :Lanczos3 resize + light sharpen\nverdict = upscaled + warning;
+else (native)
+  :resize DOWN to exact target\nverdict = pass;
+endif
+if (method == EMBROIDERY?) then (yes)
+  :k-means quantise to 6 colours;
+endif
+:toColourspace(srgb)\nPNG (alpha) or JPEG 4:4:4\nwithMetadata(density = DPI);
+:PrintReport\nverdict, warnings, pixel math;
+:Human views mockup\non real garment colour at 100% and 400%;
+if (approved?) then (yes)
+  :POST /media/upload-url -> PUT -> /media/images;
+  :POST /products (design, publishOnCreate false);
+  :Review mockups in Fourthwall;
+  :Publish listing + sample order;
+  stop
+else (no)
+  :Back to generate/retouch;
+  stop
+endif
+@enduml

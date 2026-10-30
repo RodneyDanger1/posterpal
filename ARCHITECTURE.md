@@ -139,7 +139,7 @@ posterpal/
 │   │   ├── multiplayer/           unused template leftover — ignore
 │   │   └── posterpal/             ★ THE PRODUCT (see §5)
 │   └── routes/                    every screen + API (see §6)
-├── migrations/                    0001–0011 SQL, applied on boot / db:migrate
+├── migrations/                    0001–0014 SQL, applied on boot / db:migrate
 ├── scripts/                       worker, tests, migrate, APK, PWA, backup
 ├── e2e/                           Playwright specs (serial, :8081, PGLITE_MEMORY=1)
 ├── electron/main.mjs              Windows shell
@@ -613,6 +613,9 @@ Never edit `0001_auth.sql`. Add `000N_*.sql`. Applied by `scripts/migrate.mjs` (
 | `0009_oauth_redirect.sql` | `oauth_states.redirect_uri` |
 | `0010_media_assets.sql` | `media_assets` (stills not yet attached to a post) |
 | `0011_page_picture_slots.sql` | `pages.picture_url`, `pages.posting_slots_json` |
+| `0012_commerce.sql` | `commerce_connections`, `commerce_products`, `commerce_orders`, `commerce_webhook_events`, `commerce_checkout_clicks`, `print_exports` |
+| `0013_messenger.sql` | `messenger_threads`, `messenger_messages` |
+| `0014_media_files.sql` | `content_items.file_path`, `media_assets.file_path|byte_size|sha256` |
 
 App tables are scoped by `user_id`. Exception: `desk_logs.user_id` is **nullable** (process-wide errors with no operator).
 
@@ -1004,10 +1007,10 @@ Legend: **done** in tree · **partial** · **not started** · **never** (policy)
 | CI | **done** | `.github/workflows/ci.yml` |
 | `.env.example` | **done** | |
 | Live Graph verification on operator’s Pages | **not started** | needs Dev-Mode App + real Pages |
-| Media on disk/S3 | **not started** | `content_items.data_url` / `media_assets.data_url` |
-| Editable `page_topics` pins | **not started** | Surpass R2 |
-| “Dig deeper” second research pass | **not started** | Surpass R3 |
-| Locale / timezone as a first-class setting | **done** | Settings picker + `loadSettings.timezone`; heatmap/chips consume it. Quiet hours still parse datetime-local. Locale inferred (`Winona` / `Minnesota` / `in City`). |
+| Media on disk/S3 | **done (disk)** | `src/lib/posterpal/media-files.ts` + `/api/media/$id`; `content_items.data_url` is now a legacy fallback only. Media dir: `POSTERPAL_MEDIA_DIR` → `%APPDATA%\PosterPal\media` → `<cwd>/.posterpal-media`; Docker mounts `media:/data`. |
+| Fourthwall commerce connector | **done** | `src/lib/commerce/*`, `/commerce`, `/api/commerce/fourthwall/{webhook,checkout}` |
+| Facebook Messenger (HITL) | **done** | `messenger.ts`, `/messenger`, `/api/facebook/messenger`; 24-hour window enforced |
+| Locale / timezone as a first-class setting | **done** | Settings picker + `loadSettings.timezone`; heatmap/chips consume it. **Quiet hours are now zone-aware** (`hourInAudienceZone`). Locale inferred (`Winona` / `Minnesota` / `in City`). |
 | Video/Reel cover picker | **not started** | |
 | Watermarks | **not started** | |
 | Public `/shop` merch block | **not started** | |
@@ -1040,17 +1043,36 @@ Deepening research (Surpass §17.6 R1–R8): keep refuse-regex (R1, ongoing), pi
 
 ---
 
-## 21. Faults / debt (honest)
+## 21. Second pass — 2026-10-29 (commerce, Messenger, media on disk)
 
-1. **Media as data URLs in Postgres** will melt at a few hundred photos/videos. `content_items.data_url` and `media_assets.data_url`. `resolveMedia` also accepts `http(s)` URLs (Graph `url=` upload). Next step: files on disk / S3; keep `created_with_ai`.
+Added since the sections above were written:
+
+| Area | Files | Notes |
+| --- | --- | --- |
+| Commerce domain | `src/lib/commerce/{types,fourthwall,store,print-specs,print-assets,fns}.ts` | Fourthwall Platform Open API client (Basic auth), product sync/order sync, 5-step design-product pipeline, signed webhooks, HMAC verification, pure checkout-URL builder |
+| Commerce UI/API | `src/routes/commerce.tsx`, `src/routes/api/commerce/fourthwall/{webhook,checkout}.ts` | `/commerce` admin, `POST` webhook (raw-body HMAC + idempotent event id), `GET` 303 buy link with attribution log |
+| Messenger | `src/lib/posterpal/{messenger,messenger-fns}.ts`, `src/routes/messenger.tsx`, `src/routes/api/facebook/messenger.ts` | `X-Hub-Signature-256` verification before storage, 24-hour window enforced in `sendMessengerReplyFn`, no Message Tags, echoes recorded as outbound |
+| Media files | `src/lib/posterpal/media-files.ts`, `src/routes/api/media/$id.ts`, `migrations/0014` | content-addressed by SHA-256; per-user path; traversal guard; 25 MB cap; `POSTERPAL_MEDIA_DIR` / APPDATA / cwd resolution |
+| Needs-you | `devices.needsYou`, `agent-skills.personaForNeed`, `types.NeedsItem` | new `commerce` and `messenger` kinds; commerce connection errors, missing webhook secret, Messenger window countdown |
+| Tests | `scripts/{commerce,print-assets,media-files,quiet-hours}.test.mjs`, `e2e/{commerce,messenger}.spec.ts` | 44 new unit tests + 8 new e2e specs; smoke canary includes `/commerce` and `/messenger` |
+
+Deliberate boundaries: checkout stays Fourthwall-hosted (Merchant of Record); no order-creation API is
+called; Printful is not implemented (official docs are login-gated); Printify order submission was
+dropped by product decision.
+
+---
+
+## 22. Faults / debt (honest)
+
+1. **Media storage is disk-first now.** New rows write bytes through `media-files.ts` and keep only `file_path` (+ sha256); `/api/media/{id}` serves them, `resolveMedia` reads the file, and legacy rows with `data_url` still work. If the media dir is not writable (read-only serverless FS), the write falls back to inline `data_url` and logs `media.store` — so a deployment without a persistent volume still runs, it just falls back to the old behaviour. Orphaned files are not garbage-collected yet (deleting a post leaves its file; content-addressed so duplicates are shared).
 2. **Local scheduler is not 24/7 Graph.** Overdue >10 minutes needs a human click. Limit 8 due posts per tick. Practice “publishes” only locally (`practice_` ids).
 3. **Stories/Reels** exist but are the least battle-tested. Stories cannot be Graph-scheduled.
 4. **Carousel partial success** is a warning, not `Failed`.
 5. **Reschedule Graph PATCH failure** can leave the original Facebook slot plus a local row.
 6. **Two `resolvePageId` functions remain** (`page-id.ts` and `ops.ts`) but **both** now refuse stale ids (`undefined`). `ops` list/analytics/media/calendar return empty on a stale provided id (never remap to `pages[0]`). Writes still throw via `getPage`.
-7. **Quiet hours** still parse `T(\d{2})` from a datetime-local string and treat **23:00–06:00** as quiet. Heatmap/chips use `SettingsBag.timezone`.
+7. **Quiet hours** are audience-zone aware now: `hourInAudienceZone(localDatetime, SettingsBag.timezone)` re-projects the instant and treats **23:00–06:00** in that zone as quiet. An invalid IANA zone falls back to the wall clock instead of throwing (`operator.ts`, unit-tested).
 8. **Cadence counts scheduled-in-window (±24h)**, not only Published. Reels have a separate Meta **30/24h** API cap.
-9. **`desk.ts` vs `operator.ts`** overlap. Prefer `operator.ts`.
+9. **`desk.ts` overlaps `operator.ts`** for caption/quiet helpers; `desk.isQuietHour` is a re-export, so the two copies cannot drift. Prefer `operator.ts`.
 10. **`fns-handled.ts` is unused.** `ops.markCommentHandled` also copies `inbox-extra.ts` SQL.
 11. **Graph-ahead scheduler** CAS-claims `Publishing` before `attemptGraphPublish(..., "schedule")`; on failure it reverts to `LocalScheduled` so the next tick can retry. Due-now CAS is unchanged.
 12. **RSS** max **5** items, **10s** abort, exact-or-remix dedup, **with** `REMIX_MARK`.
@@ -1074,7 +1096,7 @@ Deepening research (Surpass §17.6 R1–R8): keep refuse-regex (R1, ongoing), pi
 
 ---
 
-## 21.1 Constants cheat sheet (do not drift)
+## 22.1 Constants cheat sheet (do not drift)
 
 | Thing | Value | Where |
 | --- | --- | --- |
@@ -1119,7 +1141,7 @@ Deepening research (Surpass §17.6 R1–R8): keep refuse-regex (R1, ongoing), pi
 
 ---
 
-## 22. Keeping this file current
+## 23. Keeping this file current
 
 Update **this file in the same PR/change** when you:
 
