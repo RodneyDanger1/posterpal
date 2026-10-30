@@ -73,6 +73,8 @@ export function CommandPalette({
               ["/analytics", "Analytics"],
               ["/media", "Media library"],
               ["/merchandise", "Merchandise"],
+              ["/commerce", "Commerce — Fourthwall"],
+              ["/messenger", "Messenger"],
               ["/vault", "Token vault"],
               ["/pair", "Pair a phone"],
               ["/connect", "Connect Facebook"],

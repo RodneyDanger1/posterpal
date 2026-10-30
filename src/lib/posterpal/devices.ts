@@ -218,6 +218,79 @@ export async function needsYou(userId: string): Promise<NeedsItem[]> {
     }
   }
 
+  // Commerce and Messenger are newer surfaces. Missing tables (an old DB whose
+  // migrations failed) must not take down the whole Needs-you list, so each block
+  // degrades independently and says why in the console.
+  try {
+    const connections = await sql<{
+      id: string;
+      label: string;
+      status: string;
+      last_error: string | null;
+      has_hook: boolean;
+    }>`
+      select id, label, status, last_error, (webhook_secret_enc is not null) as has_hook
+      from commerce_connections where user_id = ${userId}
+    `;
+    for (const c of connections) {
+      if (c.status === "error") {
+        items.push({
+          id: `commerce:${c.id}`,
+          kind: "commerce",
+          title: `${c.label} connection is failing`,
+          detail: (c.last_error ?? "Fourthwall rejected the stored credentials.").slice(0, 160),
+          href: "/commerce",
+          urgency: "soon",
+        });
+      } else if (!c.has_hook && c.status === "connected") {
+        items.push({
+          id: `commerce-hook:${c.id}`,
+          kind: "commerce",
+          title: `${c.label} webhook is not configured`,
+          detail: "Orders placed on Fourthwall will not reach this desk until the webhook URL + signing secret are saved.",
+          href: "/commerce",
+          urgency: "info",
+        });
+      }
+    }
+  } catch (e) {
+    console.warn("[needs] commerce checks skipped:", e instanceof Error ? e.message : e);
+  }
+
+  try {
+    const threads = await sql<{
+      id: string;
+      display_name: string | null;
+      psid: string;
+      last_inbound_at: string | null;
+      page_name: string;
+    }>`
+      select t.id, t.display_name, t.psid, t.last_inbound_at, p.name as page_name
+      from messenger_threads t join pages p on p.id = t.page_id
+      where t.user_id = ${userId} and t.needs_reply = true
+      order by t.last_message_at desc nulls last
+      limit 4
+    `;
+    const { messagingWindow } = await import("./messenger");
+    for (const t of threads) {
+      const win = messagingWindow(t.last_inbound_at);
+      const who = t.display_name ?? `PSID ${t.psid.slice(0, 8)}…`;
+      items.push({
+        id: `messenger:${t.id}`,
+        kind: "messenger",
+        title: win.open ? `${who} · Messenger reply (${win.hoursLeft}h left)` : `${who} · Messenger window closed`,
+        detail: win.open
+          ? "Reply before the 24-hour window closes. Every reply is your click; nothing auto-sends."
+          : "The 24-hour window closed. Wait for them to message the Page again — this desk never uses promotional Message Tags.",
+        href: "/messenger",
+        pageName: t.page_name,
+        urgency: win.open ? ((win.hoursLeft ?? 24) <= 4 ? "now" : "soon") : "info",
+      });
+    }
+  } catch (e) {
+    console.warn("[needs] messenger checks skipped:", e instanceof Error ? e.message : e);
+  }
+
   const rank = { now: 0, soon: 1, info: 2 };
   return items.sort((a, b) => rank[a.urgency] - rank[b.urgency]).slice(0, 16);
 }

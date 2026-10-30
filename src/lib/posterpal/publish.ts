@@ -19,6 +19,7 @@ import { runPolicyChecklist, validateReel } from "./policy";
 import { listContent } from "./repo";
 import { carouselPartialWarning } from "./carousel";
 import { remixCaption } from "./briefing";
+import { readMediaBytes, storeDataUrl } from "./media-files";
 import type { ComposerInput, ContentItemRow } from "./types";
 
 export async function saveAndDispatch(userId: string, input: ComposerInput) {
@@ -89,16 +90,46 @@ export async function saveAndDispatch(userId: string, input: ComposerInput) {
   `;
 
   for (const [i, m] of (input.media ?? []).entries()) {
+    // Bytes go to disk (content-addressed). `data_url` is kept only for legacy
+    // inline payloads or when the media dir is not writable, and that downgrade
+    // is logged rather than hidden.
+    const payload = m.dataUrl?.trim() ?? "";
+    let filePath: string | null = null;
+    let sha256: string | null = null;
+    let byteSize: number | null = payload ? Math.round((payload.length * 3) / 4) : null;
+    let inline: string | null = payload || null;
+    if (payload.startsWith("data:")) {
+      const saved = await storeDataUrl({
+        userId,
+        fileName: m.fileName,
+        mimeType: m.mimeType ?? null,
+        dataUrl: payload,
+      });
+      if (saved.ok) {
+        filePath = saved.media.storageKey;
+        sha256 = saved.media.sha256;
+        byteSize = saved.media.byteSize;
+        inline = null;
+      } else {
+        const { deskLog } = await import("./log");
+        await deskLog({
+          level: "warn",
+          scope: "media.store",
+          userId,
+          message: `Kept inline data URL — ${saved.reason}`,
+        });
+      }
+    }
     await sql`
       insert into content_items (
         id, user_id, post_id, file_name, mime_type, media_kind, file_size, width, height,
-        duration_ms, alt_text, data_url, sort_order, created_with_ai
+        duration_ms, alt_text, data_url, file_path, sha256, sort_order, created_with_ai
       ) values (
         ${randomUUID()}, ${userId}, ${id}, ${m.fileName}, ${m.mimeType ?? null},
         ${input.mediaType === "Text" ? "Photo" : input.mediaType},
-        ${m.dataUrl ? Math.round((m.dataUrl.length * 3) / 4) : null},
+        ${byteSize},
         ${m.width ?? null}, ${m.height ?? null}, ${m.durationMs ?? null},
-        ${m.altText ?? null}, ${m.dataUrl ?? null}, ${i}, ${Boolean(m.createdWithAi)}
+        ${m.altText ?? null}, ${inline}, ${filePath}, ${sha256}, ${i}, ${Boolean(m.createdWithAi)}
       )
     `;
   }
@@ -225,6 +256,22 @@ type MediaSource =
   | { kind: "bytes"; bytes: Uint8Array; mime: string; fileName: string };
 
 async function resolveMedia(item: ContentItemRow): Promise<MediaSource | null> {
+  // New rows: bytes on disk. Legacy rows: data URL or public http(s) URL.
+  if (item.file_path) {
+    const stored = await readMediaBytes(item.file_path);
+    if (stored) {
+      return {
+        kind: "bytes",
+        bytes: new Uint8Array(stored),
+        mime: item.mime_type || "application/octet-stream",
+        fileName: item.file_name,
+      };
+    }
+    // File vanished (media dir moved/wiped) — fail loudly, never publish silently empty.
+    throw new Error(
+      `Stored media "${item.file_name}" is missing from the media folder. Re-upload it before publishing.`,
+    );
+  }
   const raw = item.data_url?.trim() ?? "";
   if (raw.startsWith("http://") || raw.startsWith("https://")) return { kind: "http", url: raw };
   if (raw.startsWith("data:")) {

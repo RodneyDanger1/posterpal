@@ -44,8 +44,7 @@ export function pageHue(id: string): string {
 }
 
 /** Clipboard write that never throws when the preview iframe blocks clipboard. */
-export async function copyText(text: string): Promise<boolean> {
-  const value = text.trim();
+export async function copyText(text: string): Promise<boolean> {  const value = text.trim();
   if (!value) return false;
   try {
     if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
@@ -68,5 +67,27 @@ export async function copyText(text: string): Promise<boolean> {
     return ok;
   } catch {
     return false;
+  }
+}
+
+/**
+ * Fetch a stored media URL and return an inline data URL.
+ * Needed by "Open in Composer" for photos that now live on disk rather than in
+ * the database. Returns null (never throws) so callers can skip that item.
+ */
+export async function dataUrlFromUrl(url: string): Promise<string | null> {
+  try {
+    const res = await fetch(url, { credentials: "same-origin" });
+    if (!res.ok) return null;
+    const blob = await res.blob();
+    if (!blob.size) return null;
+    return await new Promise<string | null>((resolve) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(typeof reader.result === "string" ? reader.result : null);
+      reader.onerror = () => resolve(null);
+      reader.readAsDataURL(blob);
+    });
+  } catch {
+    return null;
   }
 }

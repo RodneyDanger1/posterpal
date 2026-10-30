@@ -23,3 +23,8 @@ release/
 # Playwright output
 test-results/
 scripts/test-rss.xml
+
+# Stored media files (post photos/videos, Imagine stills)
+.posterpal-media/
+.posterpal-media
+

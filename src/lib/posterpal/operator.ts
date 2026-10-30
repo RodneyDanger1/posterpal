@@ -321,11 +321,47 @@ export function captionHint(level: ReturnType<typeof captionStats>["level"]): st
   return "Over Facebook's 63,206-character limit.";
 }
 
-export function isQuietHour(localDatetime: string): boolean {
+/**
+ * Hour-of-day for a datetime-local value, read in the audience's time zone.
+ *
+ * A datetime-local string carries no offset, so it is parsed as the host clock and
+ * then re-projected into `timeZone`. Without this, "quiet hours 11pm–6am" was
+ * computed in the operator's zone while the heatmap and best-time chips used the
+ * audience zone — the same desk disagreeing with itself.
+ *
+ * An unknown/invalid IANA zone falls back to the wall-clock hour (never throws).
+ */
+export function hourInAudienceZone(
+  localDatetime: string,
+  timeZone?: string | null,
+): number | null {
+  const instant = new Date(localDatetime);
+  if (timeZone && !Number.isNaN(instant.getTime())) {
+    try {
+      const parts = new Intl.DateTimeFormat("en-US", {
+        hour: "2-digit",
+        hour12: false,
+        timeZone,
+      }).formatToParts(instant);
+      const raw = parts.find((p) => p.type === "hour")?.value;
+      if (raw) {
+        const hour = Number(raw);
+        if (Number.isFinite(hour)) return hour % 24;
+      }
+    } catch {
+      // fall through to wall clock
+    }
+  }
   const m = /T(\d{2})/.exec(localDatetime);
-  if (!m) return false;
-  const h = Number(m[1]);
-  return h >= 23 || h < 6;
+  if (!m) return null;
+  const hour = Number(m[1]);
+  return Number.isFinite(hour) ? hour : null;
+}
+
+export function isQuietHour(localDatetime: string, timeZone?: string | null): boolean {
+  const hour = hourInAudienceZone(localDatetime, timeZone);
+  if (hour == null) return false;
+  return hour >= 23 || hour < 6;
 }
 
 /** Classify a compose/publish result so Failed never looks like success. */

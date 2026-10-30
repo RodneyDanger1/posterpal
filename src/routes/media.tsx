@@ -11,6 +11,7 @@ import { inferMediaKind } from "@/lib/posterpal/operator";
 import { IMAGE_PROVIDERS } from "@/lib/posterpal/providers";
 import type { MediaLibraryItem, SettingsBag } from "@/lib/posterpal/types";
 import { useAgentBriefStore, useShellStore } from "@/lib/store";
+import { dataUrlFromUrl } from "@/lib/utils";
 
 export const Route = createFileRoute("/media")({ component: () => <Guard><Media /></Guard> });
 
@@ -149,10 +150,18 @@ function Media() {
                 String(r.page_name ?? "").toLowerCase().includes(q)
               );
             })
-            .map((r) => (
+            .map((r) => {
+              const src =
+                typeof r.url === "string" && r.url
+                  ? r.url
+                  : typeof r.data_url === "string" &&
+                      (String(r.data_url).startsWith("data:image") || String(r.data_url).startsWith("http"))
+                    ? String(r.data_url)
+                    : null;
+              return (
             <figure key={String(r.id)} className="overflow-hidden rounded-xl bg-card shadow-card">
-              {typeof r.data_url === "string" && (String(r.data_url).startsWith("data:image") || String(r.data_url).startsWith("http")) ? (
-                <img src={String(r.data_url)} alt={String(r.alt_text ?? r.file_name)} className="aspect-square w-full object-cover" />
+              {src ? (
+                <img src={src} alt={String(r.alt_text ?? r.file_name)} className="aspect-square w-full object-cover" />
               ) : (
                 <div className="grid aspect-square place-items-center bg-muted text-sm text-muted-foreground">{String(r.media_kind)}</div>
               )}
@@ -160,28 +169,38 @@ function Media() {
                 <div className="truncate font-medium">{String(r.file_name)}</div>
                 <div className="truncate text-muted-foreground">{String(r.page_name)}</div>
                 {r.alt_text ? <div className="mt-1 line-clamp-2 text-muted-foreground">{String(r.alt_text)}</div> : <div className="mt-1 text-warning">Missing alt text</div>}
-                {typeof r.data_url === "string" && r.data_url ? (
+                {src ? (
                   <Button
                     size="sm"
                     variant="outline"
                     className="mt-2 w-full"
                     onClick={() => {
-                      const mime = String(r.mime_type ?? "image/jpeg");
-                      setPrefill({
-                        message: "",
-                        pageId,
-                        mediaType: inferMediaKind(mime),
-                        media: [
-                          {
-                            fileName: String(r.file_name),
-                            mimeType: mime,
-                            dataUrl: String(r.data_url),
-                            altText: String(r.alt_text ?? ""),
-                            createdWithAi: Boolean(r.created_with_ai),
-                          },
-                        ],
-                      });
-                      void navigate({ to: "/composer" });
+                      void (async () => {
+                        const mime = String(r.mime_type ?? "image/jpeg");
+                        // New rows keep bytes on disk — materialise an inline data
+                        // URL only for the Composer payload.
+                        const inline =
+                          typeof r.data_url === "string" && r.data_url ? r.data_url : await dataUrlFromUrl(src);
+                        if (!inline) {
+                          toast.error("Could not load this file's bytes. Re-upload it in Composer.");
+                          return;
+                        }
+                        setPrefill({
+                          message: "",
+                          pageId,
+                          mediaType: inferMediaKind(mime),
+                          media: [
+                            {
+                              fileName: String(r.file_name),
+                              mimeType: mime,
+                              dataUrl: inline,
+                              altText: String(r.alt_text ?? ""),
+                              createdWithAi: Boolean(r.created_with_ai),
+                            },
+                          ],
+                        });
+                        void navigate({ to: "/composer" });
+                      })();
                     }}
                   >
                     Reuse in Composer
@@ -189,7 +208,8 @@ function Media() {
                 ) : null}
               </figcaption>
             </figure>
-          ))}
+              );
+            })}
         </div>
         </>
       )}

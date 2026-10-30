@@ -280,7 +280,7 @@ export async function listContent(userId: string, postId: string): Promise<Conte
   const sql = await getSql();
   const rows = await sql<ContentItemRow>`
     select id, post_id, file_name, mime_type, media_kind, file_size, width, height,
-           duration_ms, alt_text, data_url, sort_order, created_with_ai
+           duration_ms, alt_text, data_url, file_path, sort_order, created_with_ai
     from content_items
     where user_id = ${userId} and post_id = ${postId}
     order by sort_order

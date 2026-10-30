@@ -17,6 +17,8 @@ const MORE = [
   { to: "/analytics", label: "Analytics" },
   { to: "/media", label: "Media" },
   { to: "/merchandise", label: "Merchandise" },
+  { to: "/commerce", label: "Commerce" },
+  { to: "/messenger", label: "Messenger" },
   { to: "/pair", label: "Pair phone" },
   { to: "/vault", label: "Token vault" },
   { to: "/connect", label: "Connect Facebook" },

@@ -13,6 +13,7 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as AgentRouteImport } from './routes/agent'
 import { Route as AnalyticsRouteImport } from './routes/analytics'
 import { Route as CalendarRouteImport } from './routes/calendar'
+import { Route as CommerceRouteImport } from './routes/commerce'
 import { Route as ComposerRouteImport } from './routes/composer'
 import { Route as ConnectRouteImport } from './routes/connect'
 import { Route as DraftsRouteImport } from './routes/drafts'
@@ -21,6 +22,7 @@ import { Route as LaterRouteImport } from './routes/later'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as MediaRouteImport } from './routes/media'
 import { Route as MerchandiseRouteImport } from './routes/merchandise'
+import { Route as MessengerRouteImport } from './routes/messenger'
 import { Route as PairRouteImport } from './routes/pair'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as SetupRouteImport } from './routes/setup'
@@ -29,10 +31,14 @@ import { Route as ApiHealthRouteImport } from './routes/api/health'
 import { Route as ApiTickRouteImport } from './routes/api/tick'
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
 import { Route as ApiFacebookCallbackRouteImport } from './routes/api/facebook/callback'
+import { Route as ApiFacebookMessengerRouteImport } from './routes/api/facebook/messenger'
 import { Route as ApiFacebookStartRouteImport } from './routes/api/facebook/start'
+import { Route as ApiMediaIdRouteImport } from './routes/api/media/$id'
 import { Route as ApiSyncActionRouteImport } from './routes/api/sync/action'
 import { Route as ApiSyncPairRouteImport } from './routes/api/sync/pair'
 import { Route as ApiSyncSnapshotRouteImport } from './routes/api/sync/snapshot'
+import { Route as ApiCommerceFourthwallCheckoutRouteImport } from './routes/api/commerce/fourthwall/checkout'
+import { Route as ApiCommerceFourthwallWebhookRouteImport } from './routes/api/commerce/fourthwall/webhook'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -52,6 +58,11 @@ const AnalyticsRoute = AnalyticsRouteImport.update({
 const CalendarRoute = CalendarRouteImport.update({
   id: '/calendar',
   path: '/calendar',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const CommerceRoute = CommerceRouteImport.update({
+  id: '/commerce',
+  path: '/commerce',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ComposerRoute = ComposerRouteImport.update({
@@ -94,6 +105,11 @@ const MerchandiseRoute = MerchandiseRouteImport.update({
   path: '/merchandise',
   getParentRoute: () => rootRouteImport,
 } as any)
+const MessengerRoute = MessengerRouteImport.update({
+  id: '/messenger',
+  path: '/messenger',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const PairRoute = PairRouteImport.update({
   id: '/pair',
   path: '/pair',
@@ -134,9 +150,19 @@ const ApiFacebookCallbackRoute = ApiFacebookCallbackRouteImport.update({
   path: '/api/facebook/callback',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiFacebookMessengerRoute = ApiFacebookMessengerRouteImport.update({
+  id: '/api/facebook/messenger',
+  path: '/api/facebook/messenger',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiFacebookStartRoute = ApiFacebookStartRouteImport.update({
   id: '/api/facebook/start',
   path: '/api/facebook/start',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiMediaIdRoute = ApiMediaIdRouteImport.update({
+  id: '/api/media/$id',
+  path: '/api/media/$id',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiSyncActionRoute = ApiSyncActionRouteImport.update({
@@ -154,12 +180,25 @@ const ApiSyncSnapshotRoute = ApiSyncSnapshotRouteImport.update({
   path: '/api/sync/snapshot',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiCommerceFourthwallCheckoutRoute =
+  ApiCommerceFourthwallCheckoutRouteImport.update({
+    id: '/api/commerce/fourthwall/checkout',
+    path: '/api/commerce/fourthwall/checkout',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const ApiCommerceFourthwallWebhookRoute =
+  ApiCommerceFourthwallWebhookRouteImport.update({
+    id: '/api/commerce/fourthwall/webhook',
+    path: '/api/commerce/fourthwall/webhook',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/agent': typeof AgentRoute
   '/analytics': typeof AnalyticsRoute
   '/calendar': typeof CalendarRoute
+  '/commerce': typeof CommerceRoute
   '/composer': typeof ComposerRoute
   '/connect': typeof ConnectRoute
   '/drafts': typeof DraftsRoute
@@ -168,6 +207,7 @@ export interface FileRoutesByFullPath {
   '/login': typeof LoginRoute
   '/media': typeof MediaRoute
   '/merchandise': typeof MerchandiseRoute
+  '/messenger': typeof MessengerRoute
   '/pair': typeof PairRoute
   '/settings': typeof SettingsRoute
   '/setup': typeof SetupRoute
@@ -176,16 +216,21 @@ export interface FileRoutesByFullPath {
   '/api/tick': typeof ApiTickRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/facebook/callback': typeof ApiFacebookCallbackRoute
+  '/api/facebook/messenger': typeof ApiFacebookMessengerRoute
   '/api/facebook/start': typeof ApiFacebookStartRoute
+  '/api/media/$id': typeof ApiMediaIdRoute
   '/api/sync/action': typeof ApiSyncActionRoute
   '/api/sync/pair': typeof ApiSyncPairRoute
   '/api/sync/snapshot': typeof ApiSyncSnapshotRoute
+  '/api/commerce/fourthwall/checkout': typeof ApiCommerceFourthwallCheckoutRoute
+  '/api/commerce/fourthwall/webhook': typeof ApiCommerceFourthwallWebhookRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/agent': typeof AgentRoute
   '/analytics': typeof AnalyticsRoute
   '/calendar': typeof CalendarRoute
+  '/commerce': typeof CommerceRoute
   '/composer': typeof ComposerRoute
   '/connect': typeof ConnectRoute
   '/drafts': typeof DraftsRoute
@@ -194,6 +239,7 @@ export interface FileRoutesByTo {
   '/login': typeof LoginRoute
   '/media': typeof MediaRoute
   '/merchandise': typeof MerchandiseRoute
+  '/messenger': typeof MessengerRoute
   '/pair': typeof PairRoute
   '/settings': typeof SettingsRoute
   '/setup': typeof SetupRoute
@@ -202,10 +248,14 @@ export interface FileRoutesByTo {
   '/api/tick': typeof ApiTickRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/facebook/callback': typeof ApiFacebookCallbackRoute
+  '/api/facebook/messenger': typeof ApiFacebookMessengerRoute
   '/api/facebook/start': typeof ApiFacebookStartRoute
+  '/api/media/$id': typeof ApiMediaIdRoute
   '/api/sync/action': typeof ApiSyncActionRoute
   '/api/sync/pair': typeof ApiSyncPairRoute
   '/api/sync/snapshot': typeof ApiSyncSnapshotRoute
+  '/api/commerce/fourthwall/checkout': typeof ApiCommerceFourthwallCheckoutRoute
+  '/api/commerce/fourthwall/webhook': typeof ApiCommerceFourthwallWebhookRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -213,6 +263,7 @@ export interface FileRoutesById {
   '/agent': typeof AgentRoute
   '/analytics': typeof AnalyticsRoute
   '/calendar': typeof CalendarRoute
+  '/commerce': typeof CommerceRoute
   '/composer': typeof ComposerRoute
   '/connect': typeof ConnectRoute
   '/drafts': typeof DraftsRoute
@@ -221,6 +272,7 @@ export interface FileRoutesById {
   '/login': typeof LoginRoute
   '/media': typeof MediaRoute
   '/merchandise': typeof MerchandiseRoute
+  '/messenger': typeof MessengerRoute
   '/pair': typeof PairRoute
   '/settings': typeof SettingsRoute
   '/setup': typeof SetupRoute
@@ -229,10 +281,14 @@ export interface FileRoutesById {
   '/api/tick': typeof ApiTickRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/facebook/callback': typeof ApiFacebookCallbackRoute
+  '/api/facebook/messenger': typeof ApiFacebookMessengerRoute
   '/api/facebook/start': typeof ApiFacebookStartRoute
+  '/api/media/$id': typeof ApiMediaIdRoute
   '/api/sync/action': typeof ApiSyncActionRoute
   '/api/sync/pair': typeof ApiSyncPairRoute
   '/api/sync/snapshot': typeof ApiSyncSnapshotRoute
+  '/api/commerce/fourthwall/checkout': typeof ApiCommerceFourthwallCheckoutRoute
+  '/api/commerce/fourthwall/webhook': typeof ApiCommerceFourthwallWebhookRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -241,6 +297,7 @@ export interface FileRouteTypes {
     | '/agent'
     | '/analytics'
     | '/calendar'
+    | '/commerce'
     | '/composer'
     | '/connect'
     | '/drafts'
@@ -249,6 +306,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/media'
     | '/merchandise'
+    | '/messenger'
     | '/pair'
     | '/settings'
     | '/setup'
@@ -257,16 +315,21 @@ export interface FileRouteTypes {
     | '/api/tick'
     | '/api/auth/$'
     | '/api/facebook/callback'
+    | '/api/facebook/messenger'
     | '/api/facebook/start'
+    | '/api/media/$id'
     | '/api/sync/action'
     | '/api/sync/pair'
     | '/api/sync/snapshot'
+    | '/api/commerce/fourthwall/checkout'
+    | '/api/commerce/fourthwall/webhook'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
     | '/agent'
     | '/analytics'
     | '/calendar'
+    | '/commerce'
     | '/composer'
     | '/connect'
     | '/drafts'
@@ -275,6 +338,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/media'
     | '/merchandise'
+    | '/messenger'
     | '/pair'
     | '/settings'
     | '/setup'
@@ -283,16 +347,21 @@ export interface FileRouteTypes {
     | '/api/tick'
     | '/api/auth/$'
     | '/api/facebook/callback'
+    | '/api/facebook/messenger'
     | '/api/facebook/start'
+    | '/api/media/$id'
     | '/api/sync/action'
     | '/api/sync/pair'
     | '/api/sync/snapshot'
+    | '/api/commerce/fourthwall/checkout'
+    | '/api/commerce/fourthwall/webhook'
   id:
     | '__root__'
     | '/'
     | '/agent'
     | '/analytics'
     | '/calendar'
+    | '/commerce'
     | '/composer'
     | '/connect'
     | '/drafts'
@@ -301,6 +370,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/media'
     | '/merchandise'
+    | '/messenger'
     | '/pair'
     | '/settings'
     | '/setup'
@@ -309,10 +379,14 @@ export interface FileRouteTypes {
     | '/api/tick'
     | '/api/auth/$'
     | '/api/facebook/callback'
+    | '/api/facebook/messenger'
     | '/api/facebook/start'
+    | '/api/media/$id'
     | '/api/sync/action'
     | '/api/sync/pair'
     | '/api/sync/snapshot'
+    | '/api/commerce/fourthwall/checkout'
+    | '/api/commerce/fourthwall/webhook'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -320,6 +394,7 @@ export interface RootRouteChildren {
   AgentRoute: typeof AgentRoute
   AnalyticsRoute: typeof AnalyticsRoute
   CalendarRoute: typeof CalendarRoute
+  CommerceRoute: typeof CommerceRoute
   ComposerRoute: typeof ComposerRoute
   ConnectRoute: typeof ConnectRoute
   DraftsRoute: typeof DraftsRoute
@@ -328,6 +403,7 @@ export interface RootRouteChildren {
   LoginRoute: typeof LoginRoute
   MediaRoute: typeof MediaRoute
   MerchandiseRoute: typeof MerchandiseRoute
+  MessengerRoute: typeof MessengerRoute
   PairRoute: typeof PairRoute
   SettingsRoute: typeof SettingsRoute
   SetupRoute: typeof SetupRoute
@@ -336,10 +412,14 @@ export interface RootRouteChildren {
   ApiTickRoute: typeof ApiTickRoute
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
   ApiFacebookCallbackRoute: typeof ApiFacebookCallbackRoute
+  ApiFacebookMessengerRoute: typeof ApiFacebookMessengerRoute
   ApiFacebookStartRoute: typeof ApiFacebookStartRoute
+  ApiMediaIdRoute: typeof ApiMediaIdRoute
   ApiSyncActionRoute: typeof ApiSyncActionRoute
   ApiSyncPairRoute: typeof ApiSyncPairRoute
   ApiSyncSnapshotRoute: typeof ApiSyncSnapshotRoute
+  ApiCommerceFourthwallCheckoutRoute: typeof ApiCommerceFourthwallCheckoutRoute
+  ApiCommerceFourthwallWebhookRoute: typeof ApiCommerceFourthwallWebhookRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -370,6 +450,13 @@ declare module '@tanstack/react-router' {
       path: '/calendar'
       fullPath: '/calendar'
       preLoaderRoute: typeof CalendarRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/commerce': {
+      id: '/commerce'
+      path: '/commerce'
+      fullPath: '/commerce'
+      preLoaderRoute: typeof CommerceRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/composer': {
@@ -428,6 +515,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof MerchandiseRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/messenger': {
+      id: '/messenger'
+      path: '/messenger'
+      fullPath: '/messenger'
+      preLoaderRoute: typeof MessengerRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/pair': {
       id: '/pair'
       path: '/pair'
@@ -484,11 +578,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiFacebookCallbackRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/facebook/messenger': {
+      id: '/api/facebook/messenger'
+      path: '/api/facebook/messenger'
+      fullPath: '/api/facebook/messenger'
+      preLoaderRoute: typeof ApiFacebookMessengerRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/facebook/start': {
       id: '/api/facebook/start'
       path: '/api/facebook/start'
       fullPath: '/api/facebook/start'
       preLoaderRoute: typeof ApiFacebookStartRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/media/$id': {
+      id: '/api/media/$id'
+      path: '/api/media/$id'
+      fullPath: '/api/media/$id'
+      preLoaderRoute: typeof ApiMediaIdRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/sync/action': {
@@ -512,6 +620,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiSyncSnapshotRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/commerce/fourthwall/checkout': {
+      id: '/api/commerce/fourthwall/checkout'
+      path: '/api/commerce/fourthwall/checkout'
+      fullPath: '/api/commerce/fourthwall/checkout'
+      preLoaderRoute: typeof ApiCommerceFourthwallCheckoutRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/commerce/fourthwall/webhook': {
+      id: '/api/commerce/fourthwall/webhook'
+      path: '/api/commerce/fourthwall/webhook'
+      fullPath: '/api/commerce/fourthwall/webhook'
+      preLoaderRoute: typeof ApiCommerceFourthwallWebhookRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -520,6 +642,7 @@ const rootRouteChildren: RootRouteChildren = {
   AgentRoute: AgentRoute,
   AnalyticsRoute: AnalyticsRoute,
   CalendarRoute: CalendarRoute,
+  CommerceRoute: CommerceRoute,
   ComposerRoute: ComposerRoute,
   ConnectRoute: ConnectRoute,
   DraftsRoute: DraftsRoute,
@@ -528,6 +651,7 @@ const rootRouteChildren: RootRouteChildren = {
   LoginRoute: LoginRoute,
   MediaRoute: MediaRoute,
   MerchandiseRoute: MerchandiseRoute,
+  MessengerRoute: MessengerRoute,
   PairRoute: PairRoute,
   SettingsRoute: SettingsRoute,
   SetupRoute: SetupRoute,
@@ -536,10 +660,14 @@ const rootRouteChildren: RootRouteChildren = {
   ApiTickRoute: ApiTickRoute,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
   ApiFacebookCallbackRoute: ApiFacebookCallbackRoute,
+  ApiFacebookMessengerRoute: ApiFacebookMessengerRoute,
   ApiFacebookStartRoute: ApiFacebookStartRoute,
+  ApiMediaIdRoute: ApiMediaIdRoute,
   ApiSyncActionRoute: ApiSyncActionRoute,
   ApiSyncPairRoute: ApiSyncPairRoute,
   ApiSyncSnapshotRoute: ApiSyncSnapshotRoute,
+  ApiCommerceFourthwallCheckoutRoute: ApiCommerceFourthwallCheckoutRoute,
+  ApiCommerceFourthwallWebhookRoute: ApiCommerceFourthwallWebhookRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

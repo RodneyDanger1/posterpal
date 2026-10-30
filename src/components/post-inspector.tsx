@@ -19,7 +19,7 @@ import { facebookPermalink, isRemixDraft } from "@/lib/posterpal/briefing";
 import { publishToast, toLocalInput } from "@/lib/posterpal/operator";
 import type { CommentRow, ContentItemRow, PageRow, PostRow } from "@/lib/posterpal/types";
 import { useAgentBriefStore, useInspectorStore, useShellStore } from "@/lib/store";
-import { copyText, relativeTime } from "@/lib/utils";
+import { copyText, dataUrlFromUrl, relativeTime } from "@/lib/utils";
 
 export function PostInspector() {
   const postId = useInspectorStore((s) => s.postId);
@@ -105,15 +105,21 @@ export function PostInspector() {
             {post.error_message ? <p className="rounded-md bg-destructive/10 px-3 py-2 text-[13px] text-destructive">{post.error_message}</p> : null}
             {media.length > 0 ? (
               <div className="flex flex-wrap gap-2">
-                {media.map((m) =>
-                  m.data_url && (m.data_url.startsWith("data:image") || m.data_url.startsWith("http")) ? (
-                    <img key={m.id} src={m.data_url} alt={m.alt_text ?? m.file_name} className="size-20 rounded-md object-cover" />
+                {media.map((m) => {
+                  const src =
+                    m.file_path || !m.data_url
+                      ? `/api/media/${encodeURIComponent(m.id)}`
+                      : m.data_url.startsWith("data:image") || m.data_url.startsWith("http")
+                        ? m.data_url
+                        : null;
+                  return src ? (
+                    <img key={m.id} src={src} alt={m.alt_text ?? m.file_name} className="size-20 rounded-md object-cover" />
                   ) : (
                     <div key={m.id} className="grid size-20 place-items-center rounded-md bg-muted text-[11px] text-muted-foreground">
                       {m.media_kind}
                     </div>
-                  ),
-                )}
+                  );
+                })}
               </div>
             ) : null}
             <div className="flex flex-wrap gap-3 text-[13px] text-muted-foreground tabular-nums">
@@ -263,25 +269,42 @@ export function PostInspector() {
               <Button
                 size="sm"
                 onClick={() => {
-                  setPage(post.page_id);
-                  setPrefill({
-                    message: post.message ?? "",
-                    pageId: post.page_id,
-                    mediaType: post.media_type,
-                    link: post.link ?? undefined,
-                    when: post.scheduled_publish_time ? toLocalInput(new Date(post.scheduled_publish_time)) : undefined,
-                    media: media
-                      .filter((m) => m.data_url)
-                      .map((m) => ({
-                        fileName: m.file_name,
-                        mimeType: m.mime_type ?? "application/octet-stream",
-                        dataUrl: m.data_url as string,
-                        altText: m.alt_text ?? "",
-                        createdWithAi: m.created_with_ai,
-                      })),
-                  });
-                  closeInspector();
-                  void navigate({ to: "/composer" });
+                  void (async () => {
+                    const loaded = await Promise.all(
+                      media.map(async (m) => {
+                        const inline =
+                          m.data_url ??
+                          (m.file_path || !m.data_url ? await dataUrlFromUrl(`/api/media/${encodeURIComponent(m.id)}`) : null);
+                        if (!inline) return null;
+                        return {
+                          fileName: m.file_name,
+                          mimeType: m.mime_type ?? "application/octet-stream",
+                          dataUrl: inline,
+                          altText: m.alt_text ?? "",
+                          createdWithAi: m.created_with_ai,
+                        };
+                      }),
+                    );
+                    const payload = loaded.filter((m): m is NonNullable<typeof m> => m !== null);
+                    if (media.length > 0 && payload.length === 0) {
+                      toast.error("Could not load this post's media bytes. Re-upload it in Composer.");
+                      return;
+                    }
+                    if (payload.length < media.length) {
+                      toast.message(`Loaded ${payload.length} of ${media.length} files — the rest could not be read.`);
+                    }
+                    setPage(post.page_id);
+                    setPrefill({
+                      message: post.message ?? "",
+                      pageId: post.page_id,
+                      mediaType: post.media_type,
+                      link: post.link ?? undefined,
+                      when: post.scheduled_publish_time ? toLocalInput(new Date(post.scheduled_publish_time)) : undefined,
+                      media: payload,
+                    });
+                    closeInspector();
+                    void navigate({ to: "/composer" });
+                  })();
                 }}
               >
                 Open in Composer

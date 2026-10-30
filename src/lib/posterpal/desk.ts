@@ -20,12 +20,12 @@ export function captionHint(level: ReturnType<typeof captionStats>["level"]): st
   return "Over Facebook's 63,206-character limit.";
 }
 
-export function isQuietHour(localDatetime: string): boolean {
-  const m = /T(\d{2})/.exec(localDatetime);
-  if (!m) return false;
-  const h = Number(m[1]);
-  return h >= 23 || h < 6;
-}
+/**
+ * Quiet hours used to be implemented twice (here and in operator.ts) with the
+ * host-clock-only version. Keep one implementation so a timezone fix can never
+ * drift between the two copies.
+ */
+export { hourInAudienceZone, isQuietHour } from "./operator";
 
 /** Next Tue/Wed 1pm local, at least 15 minutes from now. */
 export function nextGoodSlot(now = new Date()): string {

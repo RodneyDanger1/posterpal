@@ -134,7 +134,9 @@ export function pickPersona(brief: string, mapPage?: boolean): AgentPersonaId {
 /** Map a Needs-you kind onto the persona that should draft next. */
 export function personaForNeed(kind: string): AgentPersonaId {
   if (kind === "comment") return "inbox";
+  if (kind === "messenger") return "inbox";
   if (kind === "failed") return "rewrite";
+  if (kind === "commerce") return "shop";
   if (kind === "overdue" || kind === "cadence") return "calendar";
   return "ops";
 }

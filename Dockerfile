@@ -12,6 +12,11 @@ FROM node:22-alpine
 WORKDIR /app
 ENV NODE_ENV=production
 ENV NITRO_PORT=8080
+# Media bytes (post photos, videos, Imagine stills) live on this volume, not in
+# Postgres. Compose mounts a named volume here; Docker creates it otherwise.
+ENV POSTERPAL_MEDIA_DIR=/data/media
+RUN mkdir -p /data/media
+VOLUME ["/data"]
 
 COPY --from=build /app/package.json ./
 COPY --from=build /app/package-lock.json ./

@@ -79,6 +79,8 @@ export type ContentItemRow = {
   duration_ms: number | null;
   alt_text: string | null;
   data_url: string | null;
+  /** Relative key under POSTERPAL_MEDIA_DIR (new rows); null for legacy inline rows. */
+  file_path?: string | null;
   sort_order: number;
   created_with_ai: boolean;
 };
@@ -243,7 +245,7 @@ export type HomeSnapshot = {
 
 export type NeedsItem = {
   id: string;
-  kind: "overdue" | "failed" | "comment" | "token" | "cadence";
+  kind: "overdue" | "failed" | "comment" | "token" | "cadence" | "commerce" | "messenger";
   title: string;
   detail: string;
   href: string;
@@ -385,6 +387,10 @@ export type MediaLibraryItem = {
   media_kind: string;
   alt_text: string | null;
   data_url: string | null;
+  /** Relative key under POSTERPAL_MEDIA_DIR (new rows); null for inline legacy rows. */
+  file_path?: string | null;
+  /** Same-origin URL when the bytes live on disk; null for inline legacy rows. */
+  url?: string | null;
   page_name: string;
   mime_type: string | null;
   created_with_ai: boolean;

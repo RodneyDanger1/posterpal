@@ -5,6 +5,7 @@
  */
 import { randomBytes, randomUUID } from "node:crypto";
 import { getSql } from "@/lib/db";
+import { deleteMediaBytes, mediaUrlFor, storeDataUrl } from "./media-files";
 import { analyzeContent, aiAvailable, chatWithProvider, draftReplies, generateCaptionVariants, generateImageWithProvider, localSentiment, suggestHashtags } from "./ai";
 import { GRAPH_VERSION, REQUIRED_SCOPES } from "./constants";
 import { buildAuthorizeUrl, facebookScheduleWindow, graphFetch, GraphRequestError, unixSeconds } from "./graph";
@@ -468,6 +469,8 @@ export async function clonePost(
     pageIds: string[];
     mode?: "local-draft" | "schedule";
     scheduledAt?: string | null;
+    /** Prefix the rewrite marker even when cloning onto the same Page. */
+    remix?: boolean;
   },
 ) {
   const post = await getPost(userId, data.postId);
@@ -478,27 +481,40 @@ export async function clonePost(
   const results: Array<{ id: string; status: string; pageId: string }> = [];
   const failures: string[] = [];
   const { remixCaption } = await import("./briefing");
+  // Media may live on disk now — materialise inline bytes for the clone payload.
+  const { readMediaBytes } = await import("./media-files");
+  const mediaPayload = await Promise.all(
+    media.map(async (m) => {
+      let dataUrl = m.data_url ?? undefined;
+      if (!dataUrl && m.file_path) {
+        const bytes = await readMediaBytes(m.file_path);
+        if (bytes) dataUrl = `data:${m.mime_type || "application/octet-stream"};base64,${bytes.toString("base64")}`;
+      }
+      return {
+        fileName: m.file_name,
+        mimeType: m.mime_type ?? undefined,
+        dataUrl,
+        width: m.width ?? undefined,
+        height: m.height ?? undefined,
+        durationMs: m.duration_ms ?? undefined,
+        altText: m.alt_text ?? undefined,
+        createdWithAi: m.created_with_ai,
+      };
+    }),
+  );
   for (const pageId of pageIds) {
     const page = await getPage(userId, pageId);
     try {
+      const sameCopy = pageId === post.page_id && !data.remix;
       const result = await saveAndDispatch(userId, {
         pageId,
-        message: pageId === post.page_id ? (post.message ?? "") : remixCaption(post.message ?? ""),
+        message: sameCopy ? (post.message ?? "") : remixCaption(post.message ?? ""),
         link: post.link,
         firstComment: post.first_comment,
         mediaType: post.media_type,
         mode: data.mode ?? "local-draft",
         scheduledAt: data.scheduledAt ?? null,
-        media: media.map((m) => ({
-          fileName: m.file_name,
-          mimeType: m.mime_type ?? undefined,
-          dataUrl: m.data_url ?? undefined,
-          width: m.width ?? undefined,
-          height: m.height ?? undefined,
-          durationMs: m.duration_ms ?? undefined,
-          altText: m.alt_text ?? undefined,
-          createdWithAi: m.created_with_ai,
-        })),
+        media: mediaPayload,
       });
       results.push({ id: result.id, status: result.status, pageId });
     } catch (e) {
@@ -547,12 +563,23 @@ export async function duplicateNextWeek(userId: string, postId: string) {
   if (new Date(when).getTime() < Date.now() + 15 * 60_000) {
     when = plusDaysIso(new Date().toISOString(), 7);
   }
-  return clonePost(userId, {
+  // remix: true — the copy lands on the SAME Page with a rewrite marker. Without
+  // it the identical caption trips this Page's own duplicate policy and the
+  // schedule is silently blocked. Evergreen reuse is legitimate only after a
+  // human rewrites it for that week.
+  const result = await clonePost(userId, {
     postId,
     pageIds: [post.page_id],
     mode: "schedule",
     scheduledAt: when,
+    remix: true,
   });
+  return {
+    ...result,
+    warning:
+      result.warning +
+      " This is next week's copy, rewrite-marked — edit the caption before Send or policy will block it as a duplicate.",
+  };
 }
 
 export async function savePostingSlots(userId: string, data: { pageId: string; slots: Array<{ day: number; hour: number }> }) {
@@ -1240,7 +1267,7 @@ export async function mediaLibrary(userId: string, pageId?: string): Promise<Med
   if (pageId && !id) return [];
   const posts = id
     ? await sql<MediaLibraryItem>`
-        select ci.id, ci.file_name, ci.media_kind, ci.alt_text, ci.data_url, pa.name as page_name, ci.mime_type, ci.created_with_ai, ci.created_at
+        select ci.id, ci.file_name, ci.media_kind, ci.alt_text, ci.data_url, ci.file_path, pa.name as page_name, ci.mime_type, ci.created_with_ai, ci.created_at
         from content_items ci
         join posts po on po.id = ci.post_id
         join pages pa on pa.id = po.page_id
@@ -1249,7 +1276,7 @@ export async function mediaLibrary(userId: string, pageId?: string): Promise<Med
         limit 80
       `
     : await sql<MediaLibraryItem>`
-        select ci.id, ci.file_name, ci.media_kind, ci.alt_text, ci.data_url, pa.name as page_name, ci.mime_type, ci.created_with_ai, ci.created_at
+        select ci.id, ci.file_name, ci.media_kind, ci.alt_text, ci.data_url, ci.file_path, pa.name as page_name, ci.mime_type, ci.created_with_ai, ci.created_at
         from content_items ci
         join posts po on po.id = ci.post_id
         join pages pa on pa.id = po.page_id
@@ -1266,12 +1293,13 @@ export async function mediaLibrary(userId: string, pageId?: string): Promise<Med
           media_kind: string;
           alt_text: string | null;
           data_url: string | null;
+          file_path: string | null;
           mime_type: string | null;
           created_with_ai: unknown;
           created_at: string;
           provider: string | null;
         }>`
-          select id, file_name, media_kind, alt_text, data_url, mime_type, created_with_ai, created_at, provider
+          select id, file_name, media_kind, alt_text, data_url, file_path, mime_type, created_with_ai, created_at, provider
           from media_assets
           where user_id = ${userId} and (page_id = ${id} or page_id is null)
           order by created_at desc
@@ -1283,12 +1311,13 @@ export async function mediaLibrary(userId: string, pageId?: string): Promise<Med
           media_kind: string;
           alt_text: string | null;
           data_url: string | null;
+          file_path: string | null;
           mime_type: string | null;
           created_with_ai: unknown;
           created_at: string;
           provider: string | null;
         }>`
-          select id, file_name, media_kind, alt_text, data_url, mime_type, created_with_ai, created_at, provider
+          select id, file_name, media_kind, alt_text, data_url, file_path, mime_type, created_with_ai, created_at, provider
           from media_assets
           where user_id = ${userId}
           order by created_at desc
@@ -1300,6 +1329,7 @@ export async function mediaLibrary(userId: string, pageId?: string): Promise<Med
       media_kind: r.media_kind,
       alt_text: r.alt_text,
       data_url: r.data_url,
+      url: r.file_path ? mediaUrlFor(r.id) : r.data_url,
       page_name: r.provider ? `Library · ${r.provider}` : "Library",
       mime_type: r.mime_type,
       created_with_ai: asAiFlag(r.created_with_ai),
@@ -1311,7 +1341,11 @@ export async function mediaLibrary(userId: string, pageId?: string): Promise<Med
   }
   const merged = [
     ...assets,
-    ...posts.map((r) => ({ ...r, created_with_ai: asAiFlag(r.created_with_ai) })),
+    ...posts.map((r) => ({
+      ...r,
+      created_with_ai: asAiFlag(r.created_with_ai),
+      url: r.file_path ? mediaUrlFor(r.id) : r.data_url,
+    })),
   ];
   merged.sort((a, b) => String(b.created_at ?? "").localeCompare(String(a.created_at ?? "")));
   return merged.slice(0, 80);
@@ -1593,21 +1627,34 @@ async function persistMediaAsset(
   const sql = await getSql();
   const id = randomUUID();
   const mime = data.mimeType || (data.dataUrl.startsWith("data:") ? data.dataUrl.slice(5, data.dataUrl.indexOf(";")) : "image/png");
+  // Imagine stills go to disk; inline bytes are the fallback when the media dir
+  // is not writable, and that downgrade is logged rather than hidden.
+  const stored = await storeDataUrl({ userId, fileName: data.fileName, mimeType: mime, dataUrl: data.dataUrl });
+  if (!stored.ok) {
+    const { deskLog } = await import("./log");
+    await deskLog({ level: "warn", scope: "media.store", userId, message: `Kept inline data URL — ${stored.reason}` });
+  }
   try {
     await sql`
       insert into media_assets (
-        id, user_id, page_id, file_name, mime_type, media_kind, alt_text, data_url, prompt, provider, created_with_ai
+        id, user_id, page_id, file_name, mime_type, media_kind, alt_text, data_url, file_path, byte_size, sha256,
+        prompt, provider, created_with_ai
       ) values (
         ${id}, ${userId}, ${data.pageId ?? null}, ${data.fileName}, ${mime}, ${"Photo"},
-        ${data.altText ?? data.prompt?.slice(0, 200) ?? null}, ${data.dataUrl},
+        ${data.altText ?? data.prompt?.slice(0, 200) ?? null},
+        ${stored.ok ? null : data.dataUrl},
+        ${stored.ok ? stored.media.storageKey : null},
+        ${stored.ok ? stored.media.byteSize : null},
+        ${stored.ok ? stored.media.sha256 : null},
         ${data.prompt ?? null}, ${data.provider ?? null}, ${true}
       )
     `;
-    const extra = await sql<{ id: string }>`
-      select id from media_assets where user_id = ${userId} order by created_at desc offset 60
+    const extra = await sql<{ id: string; file_path: string | null }>`
+      select id, file_path from media_assets where user_id = ${userId} order by created_at desc offset 60
     `;
     for (const row of extra) {
       await sql`delete from media_assets where id = ${row.id} and user_id = ${userId}`;
+      if (row.file_path) await deleteMediaBytes(row.file_path);
     }
   } catch (e) {
     const { deskLog } = await import("./log");

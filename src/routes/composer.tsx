@@ -689,8 +689,10 @@ function Composer() {
                 </Hint>
               </div>
             ) : null}
-            {s.mode === "schedule" && s.when && isQuietHour(s.when) ? (
-              <p className="w-full text-[12px] text-warning">Quiet hours (11pm–6am). Reach is usually thinner then.</p>
+            {s.mode === "schedule" && s.when && isQuietHour(s.when, s.settings?.timezone) ? (
+              <p className="w-full text-[12px] text-warning">
+                Quiet hours (11pm–6am in {s.settings?.timezone || "your local zone"}). Reach is usually thinner then.
+              </p>
             ) : null}
           </div>
 

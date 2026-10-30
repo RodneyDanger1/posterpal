@@ -36,6 +36,8 @@ services:
       BETTER_AUTH_URL: ${BETTER_AUTH_URL:-}
     ports:
       - "8080:8080"
+    volumes:
+      - media:/data
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/api/health | grep -q '\"db\":\"up\"' || exit 1"]
       interval: 15s
@@ -56,8 +58,12 @@ services:
       BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:-}
       POSTERPAL_WORKER_INTERVAL_MS: ${POSTERPAL_WORKER_INTERVAL_MS:-60000}
       XAI_API_KEY: ${XAI_API_KEY:-}
+    volumes:
+      - media:/data
     # The worker keeps the desk alive when no browser tab is open: fires due
-    # LocalScheduled posts, syncs Graph, refreshes vault tokens.
+    # LocalScheduled posts, syncs Graph, refreshes vault tokens. It needs the
+    # media volume because recycling/cloning re-reads stored post media.
 
 volumes:
   pgdata:
+  media:
